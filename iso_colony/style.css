@@ -1,0 +1,30 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #1a2438;
+  font-family: "Segoe UI", "Malgun Gothic", sans-serif;
+  color: #eef2f7;
+  user-select: none; -webkit-user-select: none;
+  touch-action: none; overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#game { display: block; width: 100vw; height: 100vh; }
+
+#hud {
+  position: fixed; top: 0; left: 0; right: 0;
+  display: flex; align-items: center; gap: 14px;
+  padding: 8px 16px;
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
+  background: linear-gradient(180deg, rgba(12,18,32,0.92), rgba(12,18,32,0));
+  font-size: 15px; font-weight: 700;
+  pointer-events: none; z-index: 10;
+}
+#hud .stat { display: flex; align-items: center; gap: 5px; }
+#hud .ico { font-size: 17px; }
+#hud .sep { flex: 1; }
+#hud #phase { color: #ffd479; }
+#hud #clock { font-variant-numeric: tabular-nums; opacity: 0.85; }
