@@ -11,14 +11,29 @@
 </head>
 <body>
   <div id="hud">
-    <div class="stat"><span class="ico">🌲</span><span id="wood">0</span></div>
-    <div class="stat"><span class="ico">⛏️</span><span id="coal">0</span></div>
+    <div id="res-chips"></div>
     <div class="sep"></div>
-    <div class="stat"><span id="day">1</span>일차</div>
-    <div class="stat" id="phase">아침</div>
+    <div class="stat" id="era">🪨 석기</div>
     <div class="stat" id="clock">06:00</div>
   </div>
+
   <canvas id="game"></canvas>
+
+  <!-- 탭 오버레이 패널 (맵 위로 올라옴) -->
+  <div id="panel" class="hidden">
+    <div id="panel-head"><span id="panel-title"></span><button id="panel-close">✕</button></div>
+    <div id="panel-body"></div>
+  </div>
+
+  <!-- 하단 탭바 -->
+  <nav id="tabbar">
+    <button class="tab active" data-tab="village"><span>🏠</span>마을</button>
+    <button class="tab" data-tab="res"><span>📦</span>자원</button>
+    <button class="tab" data-tab="build"><span>🏗️</span>건설</button>
+    <button class="tab" data-tab="expedition"><span>⚔️</span>원정</button>
+  </nav>
+
+  <script src="data.js"></script>
   <script src="game.js"></script>
 </body>
 </html>

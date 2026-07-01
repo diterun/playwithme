@@ -1,470 +1,466 @@
-// 콜로니 — 나무꾼과 광부 (v1)
-// 아이소메트릭 뷰. 졸라맨 일꾼들이 낮엔 나무/돌 채집, 밤엔 집에서 취침, 매일 반복.
-// 자원(목재·석탄)이 조금씩 쌓인다. 건설·식량은 다음 버전.
+// iso_colony — 엔진 (v2: 석기시대)
+// 방치형 콜로니: 일꾼을 건물에 배정 → 자동 채집/식량 → 자원 축적 → 건물·중앙건물 레벨업.
+// 밸런스·콘텐츠 = data.js(GAME_DATA). 여기선 그걸 읽어 굴리고 그린다.
 //
-// 구성: Config → Iso 좌표 → World(타일·자원·집) → Worker(상태머신) → Time(낮밤) → Render → Loop
-// 확장 포인트: RES 종류 추가, 건물/식량/추위 등은 여기 구조 위에 얹으면 됨.
+// 구성: Config → Canvas/Iso → State → Economy → Workers → Render → Time → UI(탭·패널) → Loop
 "use strict";
 
 // ── Config ──────────────────────────────────────────────
-const TILE_W = 64, TILE_H = 32;      // 마름모 한 칸 크기(픽셀)
-const GRID = 12;                     // 12x12 땅
-const N_WORKERS = 4;
-const DAY_LEN = 40;                  // 하루 = 실시간 40초
-const NIGHT_START = 0.68;            // 이 시점부터 밤(집으로)
-const DAWN = 0.04;                   // 이 시점부터 아침(기상)
-const HARVEST_TIME = 2.4;            // 채집 1회 소요(초)
-const RESPAWN_TIME = 7;              // 고갈된 자원 재생(초)
-const WALK_SPEED = 2.2;              // 타일/초
+const TILE_W = 64, TILE_H = 32;
+const GRID = 12;
+const DAY_LEN = 40, NIGHT_START = 0.68, DAWN = 0.04;
+const WALK_SPEED = 2.2;
 
-// 집(취침 구역) 발자국: gx 0..3, gy 0..1 인 4x2 방
-const HOUSE = { x0: 0, y0: 0, x1: 3, y1: 1 };
-
-// ── Canvas ──────────────────────────────────────────────
+// ── Canvas / Iso ────────────────────────────────────────
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
-let VIEW_W = 0, VIEW_H = 0;           // CSS 픽셀 기준 화면 크기
-let DPR = 1;
-let WSCALE = 1, OFFX = 0, OFFY = 0;   // 맵→화면 배치(자동맞춤: 세로 화면에 꽉 차게)
+let VIEW_W = 0, VIEW_H = 0, DPR = 1;
+let WSCALE = 1, OFFX = 0, OFFY = 0;
 
-const MAP_TOP = 66;                   // 나무가 위로 솟는 여유
-const SPAN_X = GRID * TILE_W;                                   // 맵 가로 폭
-const SPAN_Y = 2 * (GRID - 1) * (TILE_H / 2) + TILE_H + MAP_TOP; // 맵 세로 폭
+const MAP_TOP = 70;
+const SPAN_X = GRID * TILE_W;
+const SPAN_Y = 2 * (GRID - 1) * (TILE_H / 2) + TILE_H + MAP_TOP;
 
 function resize() {
-  DPR = window.devicePixelRatio || 1;          // 폰 고해상도에서 선명하게
-  VIEW_W = window.innerWidth;
-  VIEW_H = window.innerHeight;
+  DPR = window.devicePixelRatio || 1;
+  VIEW_W = window.innerWidth; VIEW_H = window.innerHeight;
   canvas.width = Math.round(VIEW_W * DPR);
   canvas.height = Math.round(VIEW_H * DPR);
-  const pad = 14, topUI = 46;
-  WSCALE = Math.min((VIEW_W - pad * 2) / SPAN_X, (VIEW_H - topUI - pad) / SPAN_Y, 1.7);
-  OFFX = VIEW_W / 2;                            // 맵 x중심=0 → 화면 중앙
-  OFFY = topUI + MAP_TOP * WSCALE;              // 최상단 나무가 UI 아래에 오게
+  const pad = 14, topUI = 46, botUI = 66;
+  WSCALE = Math.min((VIEW_W - pad * 2) / SPAN_X, (VIEW_H - topUI - botUI) / SPAN_Y, 1.7);
+  OFFX = VIEW_W / 2;
+  OFFY = topUI + MAP_TOP * WSCALE;
 }
 window.addEventListener("resize", resize);
 window.addEventListener("orientationchange", () => setTimeout(resize, 100));
 resize();
 
-// ── Iso 좌표 변환 ────────────────────────────────────────
-// 타일(gx,gy) → 맵 좌표. 화면 배치(중앙정렬·스케일)는 render에서 적용.
-function iso(gx, gy) {
-  return {
-    x: (gx - gy) * (TILE_W / 2),
-    y: (gx + gy) * (TILE_H / 2),
-  };
+function iso(gx, gy) { return { x: (gx - gy) * (TILE_W / 2), y: (gx + gy) * (TILE_H / 2) }; }
+function tc(gx, gy) { const p = iso(gx, gy); return { x: p.x, y: p.y + TILE_H / 2 }; } // 타일 바닥 중심
+function depth(gx, gy) { return gx + gy; }
+
+// ── State ───────────────────────────────────────────────
+const S = { stock: {}, pop: 0, level: {}, assign: {}, recruitT: 0, hungry: false };
+
+function initState() {
+  const d = GAME_DATA;
+  S.stock = Object.assign({}, d.start.stock);
+  S.pop = d.start.pop;
+  for (const b of d.buildings) S.level[b.id] = b.startLevel;
+  for (const b of d.buildings) if (b.kind === "prod") S.assign[b.id] = d.start.assign[b.id] || 0;
+  S.recruitT = 0; S.hungry = false;
 }
-function depth(gx, gy) { return gx + gy; }   // 뒤→앞 그리기 정렬 키
 
-function inHouse(gx, gy) {
-  return gx >= HOUSE.x0 && gx <= HOUSE.x1 && gy >= HOUSE.y0 && gy <= HOUSE.y1;
+// ── Economy ─────────────────────────────────────────────
+const central = () => S.level.campfire;
+function maxLevel(b) { return b.kind === "central" ? GAME_DATA.era.centralMax : central(); }
+function popCap() { const h = bdef("house"); return h.popBase + (S.level.house - 1) * h.popPer; }
+function storageCap() { const s = bdef("store"); return s.capBase + (S.level.store - 1) * s.capPer; }
+function assignedTotal() { let t = 0; for (const k in S.assign) t += S.assign[k]; return t; }
+function idleWorkers() { return S.pop - assignedTotal(); }
+function prodRate(b) { return b.rate * S.level[b.id] * (S.assign[b.id] || 0); } // /초 (배고픔 전)
+function netRate(id) {
+  let r = 0;
+  for (const b of GAME_DATA.buildings) if (b.kind === "prod" && b.produces === id) r += prodRate(b);
+  if (id === GAME_DATA.food.id) r -= S.pop * GAME_DATA.food.perPop;
+  return r;
+}
+function addStock(id, amt) {
+  S.stock[id] = Math.max(0, Math.min(storageCap(), (S.stock[id] || 0) + amt));
+}
+function canAfford(c) { for (const k in c) if ((S.stock[k] || 0) < c[k]) return false; return true; }
+function pay(c) { for (const k in c) S.stock[k] -= c[k]; }
+
+function upgrade(id) {
+  const b = bdef(id), l = S.level[id];
+  if (l >= maxLevel(b)) return;
+  const c = b.cost(l);
+  if (!canAfford(c)) return;
+  pay(c); S.level[id] = l + 1;
+  refreshPanel();
+}
+function setAssign(id, delta) {
+  const cur = S.assign[id] || 0, next = cur + delta;
+  if (next < 0) return;
+  if (delta > 0 && idleWorkers() <= 0) return;
+  S.assign[id] = next; reassignJobs(); refreshPanel();
 }
 
-// ── World: 자원 노드 ─────────────────────────────────────
-const RES = {
-  tree: { give: "wood", amount: 5, color: "#4b7a34", label: "🌲" },
-  rock: { give: "coal", amount: 6, color: "#7d8590", label: "⛏️" },
-};
-const resources = [];   // {gx,gy,type,amount,max,respawn}
-const beds = [];        // 취침 자리 {gx,gy}
-const stock = { wood: 0, coal: 0 };
-
-function buildWorld() {
-  // 침대: 집 안에 균등 배치
-  for (let i = 0; i < N_WORKERS; i++) {
-    const bx = HOUSE.x0 + 0.5 + (i % 4) * 0.9;
-    const by = HOUSE.y0 + 0.5 + Math.floor(i / 4) * 0.9;
-    beds.push({ gx: bx, gy: by });
+function economyStep(dt) {
+  if (isNight) return;                       // 밤엔 취침(생산 정지)
+  const hMult = S.hungry ? GAME_DATA.food.hungryMult : 1;
+  for (const b of GAME_DATA.buildings) {
+    if (b.kind !== "prod") continue;
+    let r = prodRate(b);
+    if (b.produces !== GAME_DATA.food.id) r *= hMult;   // 배고프면 채집만 감소
+    addStock(b.produces, r * dt);
   }
-  // 자원 노드: 집 밖 타일에 무작위(나무 많이, 돌 적당히)
-  const spots = [];
-  for (let gx = 0; gx < GRID; gx++)
-    for (let gy = 0; gy < GRID; gy++)
-      if (!inHouse(gx, gy) && !(gx <= HOUSE.x1 + 1 && gy <= HOUSE.y1)) spots.push({ gx, gy });
-  shuffle(spots);
-  let idx = 0;
-  const add = (type, n) => {
-    for (let k = 0; k < n && idx < spots.length; k++, idx++) {
-      const s = spots[idx];
-      resources.push({ gx: s.gx, gy: s.gy, type, amount: RES[type].amount, max: RES[type].amount, respawn: 0 });
-    }
-  };
-  add("tree", 16);
-  add("rock", 9);
+  addStock(GAME_DATA.food.id, -S.pop * GAME_DATA.food.perPop * dt);
+  S.hungry = (S.stock[GAME_DATA.food.id] || 0) <= 0;
+  // 인구 성장
+  if (S.pop < popCap() && S.stock[GAME_DATA.food.id] > GAME_DATA.recruit.minMeat) {
+    S.recruitT += dt;
+    if (S.recruitT >= GAME_DATA.recruit.time) { S.recruitT = 0; S.pop++; syncWorkers(); refreshPanel(); }
+  } else S.recruitT = 0;
 }
 
-function shuffle(a) {
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-}
+// ── Workers ─────────────────────────────────────────────
+const workers = [];
+function ringOffset(i, r) { const a = i * 2.399; return { x: Math.cos(a) * r, y: Math.sin(a) * r }; } // 황금각 분산
 
-// 살아있는(채집 가능) 노드 중 (gx,gy)에 가장 가까운 것
-function nearestResource(gx, gy) {
-  let best = null, bd = Infinity;
-  for (const r of resources) {
-    if (r.amount <= 0) continue;
-    const d = Math.hypot(r.gx - gx, r.gy - gy);
-    if (d < bd) { bd = d; best = r; }
-  }
-  return best;
-}
-
-// ── Worker: 상태머신 ─────────────────────────────────────
-// state: "toWork" | "harvest" | "toBed" | "sleep"
 class Worker {
   constructor(i) {
-    const b = beds[i];
-    this.gx = b.gx; this.gy = b.gy;
-    this.bed = b;
-    this.state = "sleep";
-    this.target = null;      // 이동 목표 {gx,gy}
-    this.node = null;        // 채집 중인 노드
-    this.timer = 0;          // 채집 타이머
-    this.phase = Math.random() * Math.PI * 2; // 걷기 애니 위상
-    this.color = ["#ffe0b2", "#c8e6c9", "#bbdefb", "#f8bbd0"][i % 4];
-    this.carry = null;       // 손에 든 자원(연출용)
-    this._face = 1;          // 바라보는 방향(화면 x): +1 우, -1 좌
+    const o = ringOffset(i, 0.4), h = bdef("house").tile;
+    this.i = i; this.gx = h[0] + o.x; this.gy = h[1] + o.y;
+    this.bed = { gx: h[0] + o.x, gy: h[1] + o.y };
+    this.job = null; this.state = "idle"; this.phase = Math.random() * 6.28;
+    this.color = ["#ffe0b2", "#c8e6c9", "#bbdefb", "#f8bbd0", "#ffccbc", "#d1c4e9"][i % 6];
+    this._face = 1;
   }
-
+  target() {
+    const o = ringOffset(this.i, 0.55);
+    if (this.job) { const t = bdef(this.job).tile; return { gx: t[0] + o.x, gy: t[1] + o.y }; }
+    const c = bdef("campfire").tile; const o2 = ringOffset(this.i, 1.2);
+    return { gx: c[0] + o2.x, gy: c[1] + o2.y };
+  }
+  tool() { return this.job ? bdef(this.job).tool : null; }
   update(dt) {
     if (isNight) {
-      // 밤: 침대로 가서 잔다
-      if (this.state !== "sleep") {
-        this.state = "toBed"; this.target = this.bed; this.node = null;
-        if (this.moveTo(this.bed, dt)) this.state = "sleep";
-      }
+      if (this.state !== "sleep") { this.state = "toBed"; if (this.moveTo(this.bed, dt)) this.state = "sleep"; }
       return;
     }
-    // 낮
-    switch (this.state) {
-      case "sleep":
-      case "toBed":
-        this.state = "toWork"; this.pickWork(); break;
-      case "toWork":
-        if (!this.node || this.node.amount <= 0) { this.pickWork(); break; }
-        if (this.moveTo(this.node, dt)) { this.state = "harvest"; this.timer = HARVEST_TIME; }
-        break;
-      case "harvest":
-        if (!this.node || this.node.amount <= 0) { this.pickWork(); break; }
-        this.timer -= dt;
-        this.phase += dt * 8;         // 채집 팔 휘두름 애니
-        if (this.timer <= 0) {
-          this.node.amount--;
-          stock[RES[this.node.type].give]++;
-          if (this.node.amount <= 0) this.node.respawn = RESPAWN_TIME;
-          this.carry = this.node.type;
-          this.pickWork();          // 다음 대상 탐색
-        }
-        break;
-    }
+    const tg = this.target();
+    if (this.moveTo(tg, dt)) this.state = this.job ? "work" : "idle";
+    else this.state = "walk";
+    if (this.state === "work") this.phase += dt * 8;
   }
-
-  pickWork() {
-    this.node = nearestResource(this.gx, this.gy);
-    this.state = this.node ? "toWork" : "toBed";
-    this.target = this.node || this.bed;
-  }
-
-  // target까지 dt만큼 이동. 도착하면 true.
   moveTo(t, dt) {
-    const dx = t.gx - this.gx, dy = t.gy - this.gy;
-    const d = Math.hypot(dx, dy);
-    const step = WALK_SPEED * dt;
+    const dx = t.gx - this.gx, dy = t.gy - this.gy, d = Math.hypot(dx, dy), step = WALK_SPEED * dt;
     if (d <= step || d < 0.02) { this.gx = t.gx; this.gy = t.gy; return true; }
-    this.gx += (dx / d) * step; this.gy += (dy / d) * step;
-    this.phase += dt * 10;
-    return false;
+    this.gx += dx / d * step; this.gy += dy / d * step; this.phase += dt * 10; return false;
   }
 }
+function syncWorkers() {
+  while (workers.length < S.pop) workers.push(new Worker(workers.length));
+  while (workers.length > S.pop) workers.pop();
+  reassignJobs();
+}
+function reassignJobs() {
+  const list = [];
+  for (const b of GAME_DATA.buildings)
+    if (b.kind === "prod") for (let k = 0; k < (S.assign[b.id] || 0); k++) list.push(b.id);
+  workers.forEach((w, i) => (w.job = list[i] || null));
+}
 
-const workers = [];
-
-// ── Time: 낮/밤 ─────────────────────────────────────────
-let t = DAWN * DAY_LEN + 0.01;   // 첫 시작은 아침 직후
-let day = 1;
-let isNight = false;
-
-function updateTime(dt) {
-  t += dt;
-  if (t >= DAY_LEN) { t -= DAY_LEN; day++; }
+// ── Time ────────────────────────────────────────────────
+let t = DAWN * DAY_LEN + 0.01, day = 1, isNight = false;
+function timeStep(dt) {
+  t += dt; if (t >= DAY_LEN) { t -= DAY_LEN; day++; }
   const p = t / DAY_LEN;
   isNight = p >= NIGHT_START || p < DAWN;
-  // HUD
-  document.getElementById("day").textContent = day;
-  const hh = Math.floor(p * 24), mm = Math.floor((p * 24 % 1) * 60);
-  document.getElementById("clock").textContent =
-    String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0");
-  document.getElementById("phase").textContent =
-    p < DAWN ? "새벽" : p < 0.28 ? "아침" : p < 0.5 ? "한낮" : p < NIGHT_START ? "오후" : "밤";
-  document.getElementById("wood").textContent = stock.wood;
-  document.getElementById("coal").textContent = stock.coal;
+}
+function clockStr() {
+  const p = t / DAY_LEN, hh = Math.floor(p * 24), mm = Math.floor((p * 24 % 1) * 60);
+  return String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0");
 }
 
-function updateResources(dt) {
-  for (const r of resources) {
-    if (r.amount <= 0 && r.respawn > 0) {
-      r.respawn -= dt;
-      if (r.respawn <= 0) r.amount = r.max;
-    }
-  }
-}
-
-// ── Render ──────────────────────────────────────────────
-function drawTileFloor(gx, gy, top, side1, side2) {
-  const p = iso(gx, gy);
-  // 마름모 윗면
-  ctx.beginPath();
-  ctx.moveTo(p.x, p.y);
-  ctx.lineTo(p.x + TILE_W / 2, p.y + TILE_H / 2);
-  ctx.lineTo(p.x, p.y + TILE_H);
-  ctx.lineTo(p.x - TILE_W / 2, p.y + TILE_H / 2);
-  ctx.closePath();
-  ctx.fillStyle = top; ctx.fill();
-  ctx.strokeStyle = "rgba(0,0,0,0.08)"; ctx.stroke();
-}
-
-function drawGround() {
-  for (let s = 0; s <= 2 * (GRID - 1); s++) {
-    for (let gx = 0; gx < GRID; gx++) {
-      const gy = s - gx;
-      if (gy < 0 || gy >= GRID) continue;
-      const shade = (gx + gy) % 2 === 0 ? "#6b9b45" : "#638f40";
-      drawTileFloor(gx, gy, shade);
-    }
-  }
-}
-
-// 집: 지붕 없는 방(바닥 나무 + 뒤쪽 두 벽 + 침대) — 내부가 보인다
-function drawHouse() {
-  // 바닥(나무 널)
-  for (let gx = HOUSE.x0; gx <= HOUSE.x1; gx++)
-    for (let gy = HOUSE.y0; gy <= HOUSE.y1; gy++)
-      drawTileFloor(gx, gy, "#a9773f");
-  const wallH = 26;
-  // 뒤-왼 벽 (gy = y0 모서리, gx 축을 따라)
-  const a = iso(HOUSE.x0, HOUSE.y0), b = iso(HOUSE.x1 + 1, HOUSE.y0);
-  wallQuad(a, b, wallH, "#8a5a2b", "#75491f");
-  // 뒤-오른 벽 (gx = x0 모서리, gy 축을 따라)
-  const c = iso(HOUSE.x0, HOUSE.y0), d = iso(HOUSE.x0, HOUSE.y1 + 1);
-  wallQuad(c, d, wallH, "#7a4e24", "#66401d");
-  // 침대
-  for (const bd of beds) drawBed(bd.gx, bd.gy);
-}
-function wallQuad(p1, p2, h, faceCol, topCol) {
-  ctx.beginPath();
-  ctx.moveTo(p1.x, p1.y);
-  ctx.lineTo(p2.x, p2.y);
-  ctx.lineTo(p2.x, p2.y - h);
-  ctx.lineTo(p1.x, p1.y - h);
-  ctx.closePath();
-  ctx.fillStyle = faceCol; ctx.fill();
-  ctx.strokeStyle = topCol; ctx.stroke();
-}
-function drawBed(gx, gy) {
-  const p = iso(gx, gy);
-  ctx.fillStyle = "#c96f4a";       // 매트
-  diamond(p.x, p.y, 26, 14);
-  ctx.fillStyle = "#eee";          // 베개
-  diamond(p.x - 6, p.y - 3, 12, 7);
-}
+// ── Render: 기본 도형 ────────────────────────────────────
 function diamond(cx, cy, w, h) {
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - h / 2);
-  ctx.lineTo(cx + w / 2, cy);
-  ctx.lineTo(cx, cy + h / 2);
-  ctx.lineTo(cx - w / 2, cy);
-  ctx.closePath();
-  ctx.fill();
+  ctx.beginPath(); ctx.moveTo(cx, cy - h / 2); ctx.lineTo(cx + w / 2, cy);
+  ctx.lineTo(cx, cy + h / 2); ctx.lineTo(cx - w / 2, cy); ctx.closePath();
+}
+function tile(gx, gy, col) {
+  const p = iso(gx, gy);
+  ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + TILE_W / 2, p.y + TILE_H / 2);
+  ctx.lineTo(p.x, p.y + TILE_H); ctx.lineTo(p.x - TILE_W / 2, p.y + TILE_H / 2); ctx.closePath();
+  ctx.fillStyle = col; ctx.fill(); ctx.strokeStyle = "rgba(0,0,0,0.08)"; ctx.stroke();
+}
+function drawGround() {
+  for (let s = 0; s <= 2 * (GRID - 1); s++)
+    for (let gx = 0; gx < GRID; gx++) {
+      const gy = s - gx; if (gy < 0 || gy >= GRID) continue;
+      tile(gx, gy, (gx + gy) % 2 === 0 ? "#6b9b45" : "#638f40");
+    }
 }
 
-function drawTree(gx, gy) {
-  const p = iso(gx, gy);
-  const bx = p.x, by = p.y + TILE_H / 2;
-  // 기둥
-  ctx.fillStyle = "#6b4a2b";
-  ctx.fillRect(bx - 4, by - 26, 8, 28);
-  // 잎(겹친 타원 3단, 톤 차이)
-  const leaves = [["#3f6b2e", 0, 0, 30, 20], ["#4b7d38", 0, -14, 26, 17], ["#568c40", 0, -26, 20, 13]];
-  for (const [c, ox, oy, w, h] of leaves) {
-    ctx.fillStyle = c;
-    ctx.beginPath();
-    ctx.ellipse(bx + ox, by - 30 + oy, w / 2, h / 2, 0, 0, Math.PI * 2);
-    ctx.fill();
+// ── Render: 건물 스프라이트 ──────────────────────────────
+function drawBuilding(b) {
+  const c = tc(b.tile[0], b.tile[1]);
+  const lv = S.level[b.id];
+  switch (b.id) {
+    case "campfire": {
+      // 돌 화덕 + 통나무 + 흔들리는 불꽃(레벨=크기)
+      const s = 1 + (lv - 1) * 0.12;
+      ctx.fillStyle = "#5b5148"; diamond(c.x, c.y, 30 * s, 16 * s); ctx.fill();
+      ctx.strokeStyle = "#6b4a2b"; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(c.x - 8, c.y + 2); ctx.lineTo(c.x + 8, c.y - 2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(c.x - 8, c.y - 2); ctx.lineTo(c.x + 8, c.y + 2); ctx.stroke();
+      const fl = 12 + Math.sin(t * 9 + b.tile[0]) * 3;
+      const grd = ctx.createLinearGradient(c.x, c.y - fl * s, c.x, c.y);
+      grd.addColorStop(0, "#ffe27a"); grd.addColorStop(1, "#e8631d");
+      ctx.fillStyle = grd;
+      ctx.beginPath(); ctx.moveTo(c.x, c.y - fl * s); ctx.quadraticCurveTo(c.x + 8 * s, c.y - 6, c.x, c.y - 2);
+      ctx.quadraticCurveTo(c.x - 8 * s, c.y - 6, c.x, c.y - fl * s); ctx.fill();
+      break;
+    }
+    case "house": drawHut(c.x, c.y, "#8a5a2b", "#6b4423"); break;
+    case "store": {
+      ctx.fillStyle = "#7a5230"; ctx.strokeStyle = "#5c3d22"; ctx.lineWidth = 1.5;
+      for (const [ox, oy] of [[-8, 2], [8, 2], [0, -6]]) { ctx.fillRect(c.x + ox - 9, c.y + oy - 14, 18, 16); ctx.strokeRect(c.x + ox - 9, c.y + oy - 14, 18, 16); }
+      break;
+    }
+    case "lumber": {
+      drawHut(c.x + 6, c.y, "#7d5a34", "#5e4326");
+      ctx.fillStyle = "#8a6a3a"; // 통나무 더미
+      for (const oy of [0, -6, -3]) { ctx.beginPath(); ctx.ellipse(c.x - 14, c.y + oy, 8, 4, 0, 0, 7); ctx.fill(); }
+      break;
+    }
+    case "quarry": {
+      ctx.fillStyle = "#9aa1ab"; ctx.beginPath(); ctx.ellipse(c.x, c.y - 6, 16, 12, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = "#7d848d"; ctx.beginPath(); ctx.ellipse(c.x + 8, c.y, 10, 7, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = "#b3bac2"; ctx.beginPath(); ctx.ellipse(c.x - 8, c.y - 2, 8, 6, 0, 0, 7); ctx.fill();
+      break;
+    }
+    case "hunter": {
+      ctx.fillStyle = "#8d6e4b"; ctx.beginPath(); // 천막
+      ctx.moveTo(c.x, c.y - 26); ctx.lineTo(c.x + 15, c.y + 2); ctx.lineTo(c.x - 15, c.y + 2); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = "#5e4a30"; ctx.lineWidth = 2; ctx.beginPath();
+      ctx.moveTo(c.x, c.y - 26); ctx.lineTo(c.x, c.y + 2); ctx.stroke();
+      break;
+    }
+    case "hall": case "barracks": {
+      ctx.globalAlpha = 0.5; drawHut(c.x, c.y, "#4b556b", "#39415260"); ctx.globalAlpha = 1;
+      ctx.fillStyle = "#cdd6e6"; ctx.font = "14px sans-serif"; ctx.textAlign = "center";
+      ctx.fillText("🔒", c.x, c.y - 8); ctx.textAlign = "left";
+      break;
+    }
   }
 }
-function drawRock(gx, gy) {
-  const p = iso(gx, gy);
-  const bx = p.x, by = p.y + TILE_H / 2 - 4;
-  const chunks = [["#8b929b", -8, 2, 20, 13], ["#6f767f", 6, 4, 16, 11], ["#a3aab3", -2, -6, 15, 10]];
-  for (const [c, ox, oy, w, h] of chunks) {
-    ctx.fillStyle = c;
-    ctx.beginPath();
-    ctx.ellipse(bx + ox, by + oy, w / 2, h / 2, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  // 석탄 알갱이
-  ctx.fillStyle = "#2b2b30";
-  ctx.beginPath(); ctx.arc(bx - 3, by - 2, 2.5, 0, 7); ctx.fill();
-  ctx.beginPath(); ctx.arc(bx + 4, by + 2, 2, 0, 7); ctx.fill();
+// 아이소 오두막(바닥+벽2+박공지붕)
+function drawHut(x, y, wall, roof) {
+  ctx.fillStyle = "#a9773f"; diamond(x, y, 30, 16); ctx.fill();
+  ctx.fillStyle = wall;
+  ctx.fillRect(x - 13, y - 16, 26, 16);
+  ctx.fillStyle = roof;
+  ctx.beginPath(); ctx.moveTo(x - 16, y - 15); ctx.lineTo(x, y - 28); ctx.lineTo(x + 16, y - 15); ctx.closePath(); ctx.fill();
 }
 
-// 2관절 팔다리: (x0,y0)어깨/엉덩 → 관절 → (x1,y1)손/발. bend=관절 꺾임 offset.
+// ── Render: 도구 + 졸라맨(관절형) ────────────────────────
 function limb(x0, y0, x1, y1, bend, width) {
   const dx = x1 - x0, dy = y1 - y0, len = Math.hypot(dx, dy) || 1;
-  const nx = -dy / len, ny = dx / len;                 // 수직 방향
-  const jx = (x0 + x1) / 2 + nx * bend, jy = (y0 + y1) / 2 + ny * bend;  // 관절 위치
-  ctx.lineWidth = width;
-  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(jx, jy); ctx.lineTo(x1, y1); ctx.stroke();
+  const jx = (x0 + x1) / 2 + (-dy / len) * bend, jy = (y0 + y1) / 2 + (dx / len) * bend;
+  ctx.lineWidth = width; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(jx, jy); ctx.lineTo(x1, y1); ctx.stroke();
 }
-
-// 도끼: 손잡이 + 삼각 날
 function drawAxe(gx, gy, ex, ey) {
-  const dx = ex - gx, dy = ey - gy, L = Math.hypot(dx, dy) || 1;
-  const ux = dx / L, uy = dy / L, px = -uy, py = ux;
-  ctx.strokeStyle = "#6b4a2b"; ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(ex, ey); ctx.stroke();
+  const dx = ex - gx, dy = ey - gy, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, px = -uy, py = ux;
+  ctx.strokeStyle = "#6b4a2b"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(ex, ey); ctx.stroke();
   ctx.fillStyle = "#cdd4dc"; ctx.strokeStyle = "#8b939d"; ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(ex - ux * 5 + px * 7, ey - uy * 5 + py * 7);
-  ctx.lineTo(ex + ux * 6 + px * 5, ey + uy * 6 + py * 5);
-  ctx.lineTo(ex + ux * 6 - px * 5, ey + uy * 6 - py * 5);
-  ctx.lineTo(ex - ux * 5 - px * 7, ey - uy * 5 - py * 7);
+  ctx.moveTo(ex - ux * 5 + px * 7, ey - uy * 5 + py * 7); ctx.lineTo(ex + ux * 6 + px * 5, ey + uy * 6 + py * 5);
+  ctx.lineTo(ex + ux * 6 - px * 5, ey + uy * 6 - py * 5); ctx.lineTo(ex - ux * 5 - px * 7, ey - uy * 5 - py * 7);
   ctx.closePath(); ctx.fill(); ctx.stroke();
 }
-
-// 곡괭이: 손잡이 + 양쪽 뾰족 머리
-function drawPickaxe(gx, gy, ex, ey) {
-  const dx = ex - gx, dy = ey - gy, L = Math.hypot(dx, dy) || 1;
-  const ux = dx / L, uy = dy / L, px = -uy, py = ux;
-  ctx.strokeStyle = "#6b4a2b"; ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(ex, ey); ctx.stroke();
+function drawPick(gx, gy, ex, ey) {
+  const dx = ex - gx, dy = ey - gy, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, px = -uy, py = ux;
+  ctx.strokeStyle = "#6b4a2b"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(ex, ey); ctx.stroke();
   ctx.strokeStyle = "#b9c0c9"; ctx.lineWidth = 3.5; ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(ex + px * 9 - ux * 3, ey + py * 9 - uy * 3);
-  ctx.quadraticCurveTo(ex + ux * 2, ey + uy * 2, ex - px * 9 - ux * 3, ey - py * 9 - uy * 3);
-  ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(ex + px * 9 - ux * 3, ey + py * 9 - uy * 3);
+  ctx.quadraticCurveTo(ex + ux * 2, ey + uy * 2, ex - px * 9 - ux * 3, ey - py * 9 - uy * 3); ctx.stroke();
 }
-
-// 졸라맨(관절형). 낮=걷기/채집(도끼·곡괭이), 밤=취침.
+function drawSpear(gx, gy, ex, ey) {
+  const dx = ex - gx, dy = ey - gy, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, px = -uy, py = ux;
+  ctx.strokeStyle = "#7d5a34"; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(ex, ey); ctx.stroke();
+  ctx.fillStyle = "#d7dde4"; ctx.beginPath(); // 삼각 창끝
+  ctx.moveTo(ex + ux * 7, ey + uy * 7); ctx.lineTo(ex + px * 3, ey + py * 3); ctx.lineTo(ex - px * 3, ey - py * 3);
+  ctx.closePath(); ctx.fill();
+}
 function drawWorker(w) {
-  const p = iso(w.gx, w.gy);
-  const cx = p.x, gy = p.y + TILE_H / 2;
-
-  // 취침
+  const p = iso(w.gx, w.gy), cx = p.x, gy = p.y + TILE_H / 2;
   if (w.state === "sleep") {
     ctx.strokeStyle = "#222"; ctx.lineWidth = 3; ctx.lineCap = "round"; ctx.fillStyle = w.color;
-    ctx.beginPath(); ctx.arc(cx - 12, gy - 6, 5, 0, 7); ctx.fill(); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(cx - 8, gy - 6); ctx.lineTo(cx + 11, gy - 5); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(cx + 11, gy - 5); ctx.lineTo(cx + 16, gy - 9); ctx.stroke(); // 다리 접힘
-    ctx.fillStyle = "#cfe0ff"; ctx.font = "italic 12px sans-serif";
-    ctx.fillText("z", cx + 4, gy - 15); ctx.fillText("Z", cx + 10, gy - 22);
+    ctx.beginPath(); ctx.arc(cx - 10, gy - 5, 4.5, 0, 7); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx - 6, gy - 5); ctx.lineTo(cx + 10, gy - 4); ctx.stroke();
+    ctx.fillStyle = "#cfe0ff"; ctx.font = "italic 11px sans-serif"; ctx.fillText("z", cx + 3, gy - 13);
     return;
   }
-
-  // 바라보는 방향 갱신
-  let fx = null;
-  if (w.state === "harvest" && w.node) fx = iso(w.node.gx, w.node.gy).x;
-  else if (w.target) fx = iso(w.target.gx, w.target.gy).x;
+  let fx = null; const tg = w.target(); if (tg) fx = iso(tg.gx, tg.gy).x;
+  if (w.state === "work") fx = iso(w.job ? bdef(w.job).tile[0] : w.gx, w.job ? bdef(w.job).tile[1] : w.gy).x;
   if (fx !== null && Math.abs(fx - cx) > 0.5) w._face = fx >= cx ? 1 : -1;
-  const face = w._face;
-
-  const hipY = gy - 15, shY = gy - 29, headY = gy - 36;
-  const moving = (w.state === "toWork" || w.state === "toBed");
-  const harvesting = w.state === "harvest";
-
+  const face = w._face, hipY = gy - 14, shY = gy - 27, headY = gy - 34;
+  const moving = w.state === "walk" || w.state === "toBed", working = w.state === "work";
   ctx.lineCap = "round"; ctx.strokeStyle = "#2b2b2b";
 
-  // ── 다리 ──
-  let footLX, footLY, footRX, footRY;
+  let fLx, fLy, fRx, fRy;
   if (moving) {
     const ph = w.phase;
-    footLX = cx + Math.sin(ph) * 6 * face;      footLY = gy - Math.max(0, Math.cos(ph)) * 4;
-    footRX = cx + Math.sin(ph + Math.PI) * 6 * face; footRY = gy - Math.max(0, Math.cos(ph + Math.PI)) * 4;
-  } else {
-    footLX = cx - 4; footLY = gy; footRX = cx + 5; footRY = gy;   // 선 자세
-  }
-  limb(cx - 1, hipY, footLX, footLY, -face * 3, 3);   // 뒷다리
-  limb(cx + 1, hipY, footRX, footRY, -face * 3, 3);   // 앞다리
+    fLx = cx + Math.sin(ph) * 6 * face; fLy = gy - Math.max(0, Math.cos(ph)) * 4;
+    fRx = cx + Math.sin(ph + Math.PI) * 6 * face; fRy = gy - Math.max(0, Math.cos(ph + Math.PI)) * 4;
+  } else { fLx = cx - 4; fLy = gy; fRx = cx + 5; fRy = gy; }
+  limb(cx - 1, hipY, fLx, fLy, -face * 3, 3);
+  limb(cx + 1, hipY, fRx, fRy, -face * 3, 3);
 
-  // ── 몸통 ──
-  const leanX = harvesting ? face * 3 : (moving ? face * 1.5 : 0);
-  ctx.lineWidth = 3.5;
-  ctx.beginPath(); ctx.moveTo(cx, hipY); ctx.lineTo(cx + leanX, shY); ctx.stroke();
-  const shX = cx + leanX;
+  const lean = working ? face * 3 : (moving ? face * 1.5 : 0), shX = cx + lean;
+  ctx.lineWidth = 3.5; ctx.beginPath(); ctx.moveTo(cx, hipY); ctx.lineTo(shX, shY); ctx.stroke();
 
-  // ── 팔 + 도구 ──
-  if (harvesting) {
-    // 두 손으로 도구를 쥐고 머리 위→아래로 내리침
-    const raise = (Math.cos(w.phase) + 1) / 2;          // 1=치켜듦, 0=내리침
-    const ang = (-2.3) + (2.9) * (1 - raise);           // 스윙 각(위→아래)
-    const gxp = shX + Math.cos(ang) * 12 * face;
-    const gyp = shY + Math.sin(ang) * 12;
-    // 도구 끝
+  if (working && w.tool()) {
+    const raise = (Math.cos(w.phase) + 1) / 2, ang = -2.3 + 2.9 * (1 - raise);
+    const gxp = shX + Math.cos(ang) * 12 * face, gyp = shY + Math.sin(ang) * 12;
     const ex = gxp + Math.cos(ang) * 16 * face, ey = gyp + Math.sin(ang) * 16;
-    limb(shX - 2, shY, gxp, gyp, face * 3, 3);          // 양팔이 그립으로
-    limb(shX + 2, shY, gxp, gyp, face * 3, 3);
-    if (w.node && w.node.type === "rock") drawPickaxe(gxp, gyp, ex, ey);
-    else drawAxe(gxp, gyp, ex, ey);
+    limb(shX - 2, shY, gxp, gyp, face * 3, 3); limb(shX + 2, shY, gxp, gyp, face * 3, 3);
+    const tl = w.tool(); tl === "pick" ? drawPick(gxp, gyp, ex, ey) : tl === "spear" ? drawSpear(gxp, gyp, ex, ey) : drawAxe(gxp, gyp, ex, ey);
     ctx.strokeStyle = "#2b2b2b";
   } else {
     const sw = moving ? Math.sin(w.phase) * 5 * face : 0;
-    limb(shX, shY, shX - sw, shY + 12, -face * 4, 3);   // 뒤팔
-    limb(shX, shY, shX + sw, shY + 12, face * 4, 3);    // 앞팔
+    limb(shX, shY, shX - sw, shY + 12, -face * 4, 3); limb(shX, shY, shX + sw, shY + 12, face * 4, 3);
   }
-
-  // ── 머리 ──
-  ctx.fillStyle = w.color;
-  ctx.beginPath(); ctx.arc(shX, headY, 5.5, 0, 7); ctx.fill();
+  ctx.fillStyle = w.color; ctx.beginPath(); ctx.arc(shX, headY, 5.5, 0, 7); ctx.fill();
   ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(shX, headY, 5.5, 0, 7); ctx.stroke();
 }
 
-// 밤 오버레이
-function drawNightOverlay() {
-  const p = t / DAY_LEN;
-  let a = 0;
+// ── Render: 밤 + 합성 ────────────────────────────────────
+function drawNight() {
+  const p = t / DAY_LEN; let a = 0;
   if (p >= NIGHT_START) a = Math.min(0.55, (p - NIGHT_START) / (1 - NIGHT_START) * 0.7);
   else if (p < DAWN) a = 0.55;
   else if (p < DAWN + 0.06) a = 0.55 * (1 - (p - DAWN) / 0.06);
   if (a > 0.01) { ctx.fillStyle = `rgba(18,26,54,${a})`; ctx.fillRect(0, 0, VIEW_W, VIEW_H); }
 }
-
 function render() {
-  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  ctx.clearRect(0, 0, VIEW_W, VIEW_H);
-  // 맵 배치: 중앙정렬 + 자동맞춤 스케일
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0); ctx.clearRect(0, 0, VIEW_W, VIEW_H);
   ctx.setTransform(DPR * WSCALE, 0, 0, DPR * WSCALE, OFFX * DPR, OFFY * DPR);
   drawGround();
-  drawHouse();
-  // 키 큰 오브젝트(자원·일꾼) 깊이 정렬 후 그리기
   const tall = [];
-  for (const r of resources) {
-    if (r.amount <= 0) continue;
-    tall.push({ d: depth(r.gx, r.gy), y: iso(r.gx, r.gy).y, fn: () => r.type === "tree" ? drawTree(r.gx, r.gy) : drawRock(r.gx, r.gy) });
-  }
-  for (const w of workers)
-    tall.push({ d: depth(w.gx, w.gy), y: iso(w.gx, w.gy).y, fn: () => drawWorker(w) });
+  for (const b of GAME_DATA.buildings) tall.push({ d: depth(b.tile[0], b.tile[1]) + 0.1, y: tc(b.tile[0], b.tile[1]).y, fn: () => drawBuilding(b) });
+  for (const w of workers) tall.push({ d: depth(w.gx, w.gy), y: iso(w.gx, w.gy).y, fn: () => drawWorker(w) });
   tall.sort((a, b) => a.d - b.d || a.y - b.y);
   for (const o of tall) o.fn();
-  // 밤 오버레이는 화면 전체(스케일 해제)
-  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  drawNightOverlay();
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0); drawNight();
 }
 
+// ── UI: HUD + 탭 + 패널 ──────────────────────────────────
+const $ = (s) => document.querySelector(s);
+const panel = $("#panel"), panelBody = $("#panel-body"), panelTitle = $("#panel-title");
+let curTab = "village";
+
+function fmt(n) { return Math.floor(n).toLocaleString("en-US"); }
+function costHTML(c) {
+  return Object.keys(c).map((k) => {
+    const r = GAME_DATA.resources.find((x) => x.id === k);
+    const ok = (S.stock[k] || 0) >= c[k];
+    return `<span class="${ok ? "" : "no"}">${r ? r.icon : k} ${fmt(c[k])}</span>`;
+  }).join("  ");
+}
+
+function updateHUD() {
+  const chips = GAME_DATA.resources.map((r) =>
+    `<div class="chip"><span class="ico">${r.icon}</span>${fmt(S.stock[r.id] || 0)}<span class="cap">/${fmt(storageCap())}</span></div>`
+  ).join("");
+  $("#res-chips").innerHTML = chips + (S.hungry ? `<div class="chip" style="color:#e06a6a">⚠️식량부족</div>` : "");
+  $("#era").textContent = `${GAME_DATA.era.badge} ${GAME_DATA.era.name} · Lv${central()}`;
+  $("#clock").textContent = (isNight ? "🌙 " : "☀️ ") + clockStr();
+}
+
+function openTab(tab) {
+  curTab = tab;
+  document.querySelectorAll("#tabbar .tab").forEach((el) => el.classList.toggle("active", el.dataset.tab === tab));
+  if (tab === "village") { panel.classList.add("hidden"); return; }
+  panel.classList.remove("hidden");
+  panelTitle.textContent = { res: "📦 자원", build: "🏗️ 건설", expedition: "⚔️ 원정" }[tab];
+  renderPanel();
+}
+function closePanel() { openTab("village"); }
+function refreshPanel() { updateHUD(); if (curTab !== "village" && !panel.classList.contains("hidden")) renderPanel(); }
+
+function renderPanel() {
+  const sc = panelBody.scrollTop;
+  if (curTab === "res") panelBody.innerHTML = viewRes();
+  else if (curTab === "build") panelBody.innerHTML = viewBuild();
+  else if (curTab === "expedition") panelBody.innerHTML = viewExpedition();
+  bindPanel();
+  panelBody.scrollTop = sc;
+}
+
+function viewRes() {
+  const rows = GAME_DATA.resources.map((r) => {
+    const net = netRate(r.id), sign = net >= 0 ? "+" : "";
+    const col = net >= 0 ? "#7fd18a" : "#e06a6a";
+    return `<div class="resrow"><span class="ico">${r.icon}</span><span class="nm">${r.name}</span>
+      <span class="amt">${fmt(S.stock[r.id] || 0)} / ${fmt(storageCap())}</span>
+      <span class="rate" style="color:${col}">${sign}${net.toFixed(2)}/s</span></div>`;
+  }).join("");
+  return `<div class="reslist">${rows}</div>
+    <p class="note" style="margin-top:12px">인구 <b>${S.pop} / ${popCap()}</b> · 배정 ${assignedTotal()} · 유휴 ${idleWorkers()}<br>
+    ${S.hungry ? "⚠️ 식량이 바닥나 채집 속도가 느려집니다. 사냥터에 일꾼을 늘리세요." : "식량이 충분합니다. 인구가 서서히 늘어납니다."}<br>
+    밤에는 일꾼이 자며 생산이 멈춥니다.</p>`;
+}
+
+function viewBuild() {
+  let html = `<p class="note">인구 <b>${S.pop}/${popCap()}</b> · 유휴 <b>${idleWorkers()}</b> · 건물 레벨 상한 = 화톳불 Lv<b>${central()}</b></p>`;
+  for (const b of GAME_DATA.buildings) {
+    const lv = S.level[b.id];
+    const locked = b.kind === "locked";
+    const maxed = !locked && lv >= maxLevel(b);
+    const capped = !locked && b.kind !== "central" && lv >= central() && lv < GAME_DATA.era.centralMax;
+    const c = locked ? null : b.cost(lv);
+    let effect = "";
+    if (b.kind === "pop") effect = `인구 상한 ${b.popBase + (lv - 1) * b.popPer} → ${b.popBase + lv * b.popPer}`;
+    else if (b.kind === "storage") effect = `저장 한도 ${fmt(b.capBase + (lv - 1) * b.capPer)} → ${fmt(b.capBase + lv * b.capPer)}`;
+    else if (b.kind === "prod") effect = `생산 ${(b.rate * lv).toFixed(2)} → ${(b.rate * (lv + 1)).toFixed(2)} /s·일꾼`;
+    else if (b.kind === "central") effect = `모든 건물 레벨 상한 ${lv} → ${lv + 1}`;
+
+    let btn;
+    if (locked) btn = `<button class="btn" disabled>🔒 잠김</button>`;
+    else if (maxed) btn = `<button class="btn" disabled>${b.kind === "central" ? "이 시대 최대" : "최대"}</button>`;
+    else if (capped) btn = `<button class="btn" disabled>화톳불 먼저</button>`;
+    else btn = `<button class="btn js-up" data-id="${b.id}" ${canAfford(c) ? "" : "disabled"}>레벨업</button>`;
+
+    const assign = b.kind === "prod" ? `<div class="assign"><span class="note">배정 일꾼</span>
+      <div class="stepper"><button class="js-dec" data-id="${b.id}" ${(S.assign[b.id] || 0) <= 0 ? "disabled" : ""}>−</button>
+      <span class="amt">${S.assign[b.id] || 0} 명</span>
+      <button class="js-inc" data-id="${b.id}" ${idleWorkers() <= 0 ? "disabled" : ""}>＋</button></div></div>` : "";
+
+    html += `<div class="card"><div class="row">
+      <div class="bico">${b.icon}</div>
+      <div class="info"><div class="name">${b.name}${locked ? "" : `<span class="lv">Lv ${lv}</span>`}</div>
+      <div class="desc">${b.desc}</div>
+      ${locked ? "" : `<div class="desc">${effect}</div>`}
+      ${c ? `<div class="cost">비용 ${costHTML(c)}</div>` : ""}</div>
+      <div>${btn}</div></div>${assign}</div>`;
+  }
+  html += `<p class="note">다음 시대: <b>${GAME_DATA.era.next}</b> — 관문 스테이지·전환 비용은 원정(v3)과 함께 열립니다.</p>`;
+  return html;
+}
+
+function viewExpedition() {
+  return `<div class="card"><div class="row"><div class="bico">🏛️</div><div class="info">
+    <div class="name">영웅의 전당</div><div class="desc">영웅을 뽑아 주둔시킵니다.</div></div></div></div>
+    <div class="card"><div class="row"><div class="bico">⚔️</div><div class="info">
+    <div class="name">원정 막사</div><div class="desc">영웅을 스테이지로 출정시켜 적을 격파하고 전리품·시대 관문을 엽니다.</div></div></div></div>
+    <p class="note">⚔️ 전투·영웅 시스템은 <b>v3</b>에서 열립니다. 지금은 자원을 모으고 마을을 키워두세요.</p>`;
+}
+
+function bindPanel() {
+  panelBody.querySelectorAll(".js-up").forEach((el) => el.onclick = () => upgrade(el.dataset.id));
+  panelBody.querySelectorAll(".js-inc").forEach((el) => el.onclick = () => setAssign(el.dataset.id, +1));
+  panelBody.querySelectorAll(".js-dec").forEach((el) => el.onclick = () => setAssign(el.dataset.id, -1));
+}
+
+document.querySelectorAll("#tabbar .tab").forEach((el) => el.onclick = () => openTab(el.dataset.tab));
+$("#panel-close").onclick = closePanel;
+
 // ── Loop ────────────────────────────────────────────────
-let last = 0;
+let last = 0, uiT = 0;
 function frame(ts) {
-  const dt = Math.min(0.05, (ts - last) / 1000 || 0);
-  last = ts;
-  updateTime(dt);
-  updateResources(dt);
+  const dt = Math.min(0.05, (ts - last) / 1000 || 0); last = ts;
+  timeStep(dt); economyStep(dt);
   for (const w of workers) w.update(dt);
   render();
+  uiT += dt; if (uiT >= 0.25) { uiT = 0; updateHUD(); if (curTab !== "village") refreshPanel(); }
   requestAnimationFrame(frame);
 }
 
 // ── Init ────────────────────────────────────────────────
-buildWorld();
-for (let i = 0; i < N_WORKERS; i++) workers.push(new Worker(i));
+initState();
+syncWorkers();
+updateHUD();
 requestAnimationFrame(frame);
