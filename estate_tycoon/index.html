@@ -19,11 +19,19 @@
 
   <canvas id="game"></canvas>
 
-  <!-- 건물 이동 모드 컨트롤 -->
+  <!-- 건물 이동 모드 컨트롤: 방향 패드(가운데 회전) + 확인/취소 -->
   <div id="move-ctl" class="hidden">
-    <button id="mv-rotate">🔄 회전</button>
-    <button id="mv-ok">✓ 확인</button>
-    <button id="mv-cancel">✕ 취소</button>
+    <div id="mv-dpad">
+      <button id="mv-nw">↖</button>
+      <button id="mv-ne">↗</button>
+      <button id="mv-rotate">🔄</button>
+      <button id="mv-sw">↙</button>
+      <button id="mv-se">↘</button>
+    </div>
+    <div id="mv-actions">
+      <button id="mv-ok">✓ 확인</button>
+      <button id="mv-cancel">✕ 취소</button>
+    </div>
   </div>
 
   <!-- 탭 오버레이 패널 -->

@@ -285,8 +285,16 @@ function drawB(g, type, gx, gy, dir, alpha, invalid) {
   const r = spriteRect(type, gx, gy, dir);
   g.globalAlpha = alpha;
   if (invalid !== undefined) {
+    // 이동 중인 유령: 발판 색칠 + debug식 테두리·기준점
     g.fillStyle = invalid ? "rgba(220,60,60,0.4)" : "rgba(80,220,110,0.35)";
     footDiamond(g, gx, gy, r.f.w, r.f.h);
+    g.fill();
+    g.strokeStyle = "#ffe14d"; g.lineWidth = 2 / cam.s;
+    footDiamond(g, gx, gy, r.f.w, r.f.h);
+    g.stroke();
+    g.fillStyle = "#ff5d5d";
+    g.beginPath();
+    g.arc(isoX(gx, gy), isoY(gx, gy), 4 / cam.s, 0, Math.PI * 2);
     g.fill();
   }
   const img = getImg(buildingImgURL(type, dir));
@@ -400,11 +408,31 @@ let drag = null, pinch0 = null;
 let lpTimer = null;
 function clearLp() { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } }
 
+// 이동 중인 유령 건물을 눌렀나 (드래그로 옮기기 판정)
+function ghostHit(wx, wy) {
+  if (!moveMode) return false;
+  const r = spriteRect(moveMode.type, moveMode.gx, moveMode.gy, moveMode.dir);
+  return wx >= r.x && wx <= r.x + r.w && wy >= r.y && wy <= r.y + r.h;
+}
+// 유령 건물을 화면 좌표(손가락) 아래로 끌어다 놓기
+function dragGhostTo(sx, sy) {
+  if (!moveMode) return;
+  const w = screenToWorld(sx, sy);
+  const t = worldToTile(w.x, w.y);
+  const f = footDims(moveMode.type, moveMode.dir);
+  moveMode.gx = Math.max(0, Math.min(MAP_W - f.w, t.gx - Math.floor(f.w / 2)));
+  moveMode.gy = Math.max(0, Math.min(MAP_H - f.h, t.gy - Math.floor(f.h / 2)));
+  updateMoveCtl();
+}
+
 canvas.addEventListener("pointerdown", e => {
   canvas.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (pointers.size === 1) {
-    drag = { sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y, moved: false };
+    // 유령 건물 위에서 시작한 드래그 = 건물 옮기기, 그 외 = 지도 이동
+    const w0 = screenToWorld(e.clientX, e.clientY);
+    const mode = ghostHit(w0.x, w0.y) ? "ghost" : "pan";
+    drag = { mode, sx: e.clientX, sy: e.clientY, cx: cam.x, cy: cam.y, moved: false };
     clearLp();
     if (!editMode && !moveMode) {
       const px = e.clientX, py = e.clientY;
@@ -416,7 +444,8 @@ canvas.addEventListener("pointerdown", e => {
         if (b) {
           setEditMode(true);
           enterMove(b.iid);
-          drag = null; // 손 뗄 때 탭으로 처리되지 않게
+          // 손가락을 떼지 않고 그대로 끌면 건물이 따라온다
+          drag = { mode: "ghost", sx: px, sy: py, cx: cam.x, cy: cam.y, moved: true };
         }
       }, 500);
     }
@@ -443,7 +472,10 @@ canvas.addEventListener("pointermove", e => {
   } else if (pointers.size === 1 && drag) {
     const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
     if (Math.hypot(dx, dy) > 7) { drag.moved = true; clearLp(); }
-    if (drag.moved) {
+    if (!drag.moved) return;
+    if (drag.mode === "ghost") {
+      dragGhostTo(e.clientX, e.clientY);   // 건물이 손가락을 따라온다
+    } else {
       cam.x = drag.cx - dx / cam.s;
       cam.y = drag.cy - dy / cam.s;
       clampCam();
@@ -487,11 +519,7 @@ function buildingAt(wx, wy) {
 function onTap(sx, sy) {
   const w = screenToWorld(sx, sy);
   if (moveMode) {
-    const t = worldToTile(w.x, w.y);
-    const f = footDims(moveMode.type, moveMode.dir);
-    moveMode.gx = Math.max(0, Math.min(MAP_W - f.w, t.gx - Math.floor(f.w / 2)));
-    moveMode.gy = Math.max(0, Math.min(MAP_H - f.h, t.gy - Math.floor(f.h / 2)));
-    updateMoveCtl();
+    dragGhostTo(sx, sy);  // 탭한 칸으로 건물 이동
     return;
   }
   // 편집 모드: 건물 탭 = 그 건물 이동·회전 시작
@@ -748,6 +776,18 @@ document.getElementById("mv-rotate").addEventListener("click", () => {
   moveMode.gy = Math.max(0, Math.min(MAP_H - f.h, moveMode.gy));
   updateMoveCtl();
 });
+// 방향 패드: 화면 기준 대각선 = 그리드 한 칸 (↗=gy-1, ↘=gx+1, ↙=gy+1, ↖=gx-1)
+function nudgeMove(dgx, dgy) {
+  if (!moveMode) return;
+  const f = footDims(moveMode.type, moveMode.dir);
+  moveMode.gx = Math.max(0, Math.min(MAP_W - f.w, moveMode.gx + dgx));
+  moveMode.gy = Math.max(0, Math.min(MAP_H - f.h, moveMode.gy + dgy));
+  updateMoveCtl();
+}
+document.getElementById("mv-ne").addEventListener("click", () => nudgeMove(0, -1));
+document.getElementById("mv-se").addEventListener("click", () => nudgeMove(1, 0));
+document.getElementById("mv-sw").addEventListener("click", () => nudgeMove(0, 1));
+document.getElementById("mv-nw").addEventListener("click", () => nudgeMove(-1, 0));
 document.getElementById("mv-ok").addEventListener("click", confirmMove);
 document.getElementById("mv-cancel").addEventListener("click", exitMove);
 

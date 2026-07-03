@@ -149,15 +149,34 @@ html, body {
 #move-ctl {
   position: fixed; left: 0; right: 0;
   bottom: calc(66px + env(safe-area-inset-bottom));
-  display: flex; justify-content: center; gap: 10px; z-index: 25;
+  display: flex; flex-direction: column; align-items: center; gap: 8px; z-index: 25;
+  pointer-events: none; /* 버튼 사이 빈틈은 맵 터치가 통과하게 */
 }
 #move-ctl.hidden { display: none; }
 #move-ctl button {
-  border: none; border-radius: 12px; padding: 12px 18px;
-  font-family: inherit; font-size: 14px; font-weight: 800; cursor: pointer;
+  pointer-events: auto;
+  border: none; font-family: inherit; font-weight: 800; cursor: pointer;
   box-shadow: 0 4px 12px rgba(0,0,0,0.4);
 }
-#mv-rotate { background: #34507e; color: #e6efff; }
+/* 방향 패드: 대각선 화살표 4개 + 가운데 회전 */
+#mv-dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 46px);
+  grid-template-rows: repeat(3, 46px);
+  gap: 4px;
+}
+#mv-dpad button {
+  border-radius: 12px; font-size: 19px;
+  background: rgba(27,36,64,0.92); color: #e6efff;
+  border: 1px solid #2c3a56;
+}
+#mv-nw { grid-area: 1 / 1; }
+#mv-ne { grid-area: 1 / 3; }
+#mv-rotate { grid-area: 2 / 2; background: #34507e; }
+#mv-sw { grid-area: 3 / 1; }
+#mv-se { grid-area: 3 / 3; }
+#mv-actions { display: flex; gap: 10px; }
+#mv-actions button { border-radius: 12px; padding: 12px 18px; font-size: 14px; }
 #mv-ok { background: #3a6b3a; color: #eafbea; }
 #mv-ok:disabled { background: #2a3654; color: #5c6883; }
 #mv-cancel { background: #7e3434; color: #ffecec; }
