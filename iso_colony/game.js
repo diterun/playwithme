@@ -1,15 +1,32 @@
-// iso_colony — 엔진 (v2: 석기시대)
-// 방치형 콜로니: 일꾼을 건물에 배정 → 자동 채집/식량 → 자원 축적 → 건물·중앙건물 레벨업.
-// 밸런스·콘텐츠 = data.js(GAME_DATA). 여기선 그걸 읽어 굴리고 그린다.
+// iso_colony — 엔진 (v3: 스탯 기반 일꾼)
+// 콜로니 시뮬레이션: 일꾼을 건물에 배정 → 도로 따라 이동 → 채집 → 자원 축적 → 건물·영주관 레벨업.
+// 시간표는 없다 — 일꾼은 각자의 스탯(스태미나·회복속도·포만감·먹는속도)이 시키는 대로
+// 스스로 근무↔휴식(숙소)↔식사(식당)를 오간다. 밸런스·콘텐츠 = data.js(GAME_DATA).
 //
-// 구성: Config → Canvas/Iso → State → Economy → Workers → Render → Time → UI(탭·패널) → Loop
+// 구성: Config → Assets → Canvas/Iso → Roads → State → Economy → Workers(상태머신) → Render → UI → Loop
 "use strict";
 
 // ── Config ──────────────────────────────────────────────
 const TILE_W = 64, TILE_H = 32;
-const GRID = 12;
-const DAY_LEN = 40, NIGHT_START = 0.68, DAWN = 0.04;
-const WALK_SPEED = 2.2;
+const GRID = GAME_DATA.mapSize;       // 맵 한 변 칸 수(레이아웃은 data.js에서 정의)
+const WALK_SPEED = 2.6;
+const STATE_LABEL = { work: "🛠️ 근무", rest: "😴 휴식", eat: "🍽️ 식사", walk: "🚶 이동", idle: "💤 대기" };
+
+// ── Assets: assets.js(ASSET_MAP)의 경로를 실제 Image로 로드 ──
+// 이미지가 없거나 아직 안 실렸으면 항상 절차적(코드로 그린) 도형으로 자연스럽게 폴백한다.
+function loadImg(src) {
+  if (!src) return null;
+  const img = new Image(); img.src = src; return img;
+}
+function imgReady(img) { return !!img && img.complete && img.naturalWidth > 0; }
+
+const BUILDING_IMG = {};
+for (const b of GAME_DATA.buildings) BUILDING_IMG[b.id] = loadImg(ASSET_MAP.buildings[b.id]);
+
+const GRASS_IMG = loadImg(ASSET_MAP.ground.grassDefault);
+const ROAD_IMG = loadImg(ASSET_MAP.ground.roadDefault);
+const OVERRIDE_IMG = {};
+for (const k in ASSET_MAP.ground.overrides) OVERRIDE_IMG[k] = loadImg(ASSET_MAP.ground.overrides[k]);
 
 // ── Canvas / Iso ────────────────────────────────────────
 const canvas = document.getElementById("game");
@@ -39,6 +56,36 @@ function iso(gx, gy) { return { x: (gx - gy) * (TILE_W / 2), y: (gx + gy) * (TIL
 function tc(gx, gy) { const p = iso(gx, gy); return { x: p.x, y: p.y + TILE_H / 2 }; } // 타일 바닥 중심
 function depth(gx, gy) { return gx + gy; }
 
+// 정사각형(size×size) 건물 구역의 "남쪽(앞) 꼭짓점" 칸 — 스프라이트·깊이정렬 앵커.
+function footTile(b) { return [b.tile[0] + b.size - 1, b.tile[1] + b.size - 1]; }
+function footAnchor(b) { const [fx, fy] = footTile(b); return tc(fx, fy); }
+// 건물 내부 대략 중앙(일꾼이 모여드는 지점 계산용, 그리드 좌표)
+function footCenterGrid(b) { const h = (b.size - 1) / 2; return { gx: b.tile[0] + h, gy: b.tile[1] + h }; }
+
+// ── Roads: 도로망 · 경로탐색 ──────────────────────────────
+// 도로 칸(GAME_DATA.roads)만 걸어다닐 수 있는 그래프. 일꾼은 "문(door)→도로→문" 경로로 이동하고,
+// 문에서 건물 내부(작업지점 등)까진 직선 짧은 이동.
+const rk = (x, y) => x + "," + y;
+const ROAD = new Set(GAME_DATA.roads.map(([x, y]) => rk(x, y)));
+function bfsPath(sx, sy, tx, ty) {
+  if (sx === tx && sy === ty) return [];
+  const startK = rk(sx, sy), goalK = rk(tx, ty);
+  if (!ROAD.has(startK) || !ROAD.has(goalK)) return [{ gx: tx, gy: ty }]; // 비상 폴백(직선)
+  const prev = new Map(), visited = new Set([startK]), q = [[sx, sy]];
+  for (let qi = 0; qi < q.length; qi++) {
+    const [cx, cy] = q[qi];
+    if (cx === tx && cy === ty) break;
+    for (const [nx, ny] of [[cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]]) {
+      const k = rk(nx, ny);
+      if (ROAD.has(k) && !visited.has(k)) { visited.add(k); prev.set(k, rk(cx, cy)); q.push([nx, ny]); }
+    }
+  }
+  if (!visited.has(goalK)) return [{ gx: tx, gy: ty }]; // 도달 불가 폴백
+  const path = []; let curK = goalK;
+  while (curK !== startK) { const [cx, cy] = curK.split(",").map(Number); path.push({ gx: cx, gy: cy }); curK = prev.get(curK); }
+  return path.reverse();
+}
+
 // ── State ───────────────────────────────────────────────
 const S = { stock: {}, pop: 0, level: {}, assign: {}, recruitT: 0, hungry: false };
 
@@ -52,19 +99,14 @@ function initState() {
 }
 
 // ── Economy ─────────────────────────────────────────────
-const central = () => S.level.campfire;
-function maxLevel(b) { return b.kind === "central" ? GAME_DATA.era.centralMax : central(); }
+const manorLevel = () => S.level.manor;
+function maxLevel(b) { return b.kind === "central" ? GAME_DATA.stage.stageMax : manorLevel(); }
 function popCap() { const h = bdef("house"); return h.popBase + (S.level.house - 1) * h.popPer; }
 function storageCap() { const s = bdef("store"); return s.capBase + (S.level.store - 1) * s.capPer; }
 function assignedTotal() { let t = 0; for (const k in S.assign) t += S.assign[k]; return t; }
 function idleWorkers() { return S.pop - assignedTotal(); }
-function prodRate(b) { return b.rate * S.level[b.id] * (S.assign[b.id] || 0); } // /초 (배고픔 전)
-function netRate(id) {
-  let r = 0;
-  for (const b of GAME_DATA.buildings) if (b.kind === "prod" && b.produces === id) r += prodRate(b);
-  if (id === GAME_DATA.food.id) r -= S.pop * GAME_DATA.food.perPop;
-  return r;
-}
+// 식당 레벨 보너스가 반영된 식사 속도 배율
+function eatMult() { const m = bdef("mess"); return 1 + (m.eatBonus || 0) * (S.level.mess - 1); }
 function addStock(id, amt) {
   S.stock[id] = Math.max(0, Math.min(storageCap(), (S.stock[id] || 0) + amt));
 }
@@ -86,58 +128,137 @@ function setAssign(id, delta) {
   S.assign[id] = next; reassignJobs(); refreshPanel();
 }
 
+// 생산: "지금 근무 중인" 일꾼만 만든다. 아사 상태(포만감 0)면 starveMult 배.
 function economyStep(dt) {
-  if (isNight) return;                       // 밤엔 취침(생산 정지)
-  const hMult = S.hungry ? GAME_DATA.food.hungryMult : 1;
-  for (const b of GAME_DATA.buildings) {
-    if (b.kind !== "prod") continue;
-    let r = prodRate(b);
-    if (b.produces !== GAME_DATA.food.id) r *= hMult;   // 배고프면 채집만 감소
-    addStock(b.produces, r * dt);
+  const food = GAME_DATA.food;
+  for (const w of workers) {
+    if (w.state !== "work" || !w.job) continue;
+    const b = bdef(w.job);
+    const mult = w.satiety <= 0 ? food.starveMult : 1;
+    addStock(b.produces, b.rate * S.level[b.id] * mult * dt);
   }
-  addStock(GAME_DATA.food.id, -S.pop * GAME_DATA.food.perPop * dt);
-  S.hungry = (S.stock[GAME_DATA.food.id] || 0) <= 0;
-  // 인구 성장
-  if (S.pop < popCap() && S.stock[GAME_DATA.food.id] > GAME_DATA.recruit.minMeat) {
+  S.hungry = (S.stock[food.id] || 0) <= 0.5;
+  // 인구 성장(식량 여유 시)
+  if (S.pop < popCap() && S.stock[food.id] > GAME_DATA.recruit.minMeat) {
     S.recruitT += dt;
     if (S.recruitT >= GAME_DATA.recruit.time) { S.recruitT = 0; S.pop++; syncWorkers(); refreshPanel(); }
-  } else S.recruitT = 0;
+  }
+}
+// 자원 탭 표시용: 현재 순간 생산·소비율
+function liveRate(id) {
+  let r = 0;
+  const food = GAME_DATA.food;
+  for (const w of workers) {
+    if (w.state === "work" && w.job && bdef(w.job).produces === id)
+      r += bdef(w.job).rate * S.level[w.job] * (w.satiety <= 0 ? food.starveMult : 1);
+    if (id === food.id && w.state === "eat" && (S.stock[food.id] || 0) > 0) r -= food.eatCost;
+  }
+  return r;
 }
 
-// ── Workers ─────────────────────────────────────────────
+// ── Workers: 스탯 기반 상태머신 ──────────────────────────
+// [근무] 스태미나 0 → [휴식](숙소, regen으로 충전) → 가득 차면 복귀
+// [근무] 포만감 30% 밑 → [식사](식당, eatSpeed로 충전 + 식량 소비) → 가득 차면 복귀
+// (배정 없음) → [대기](영주관 앞)
 const workers = [];
 function ringOffset(i, r) { const a = i * 2.399; return { x: Math.cos(a) * r, y: Math.sin(a) * r }; } // 황금각 분산
+// 개체차: 기본값 × (1 ± variance)
+function rollStat(base) {
+  const v = GAME_DATA.worker.variance;
+  return base * (1 + (Math.random() * 2 - 1) * v);
+}
 
 class Worker {
   constructor(i) {
-    const o = ringOffset(i, 0.4), h = bdef("house").tile;
-    this.i = i; this.gx = h[0] + o.x; this.gy = h[1] + o.y;
-    this.bed = { gx: h[0] + o.x, gy: h[1] + o.y };
+    const d = bdef("house").door;
+    this.i = i; this.gx = d[0]; this.gy = d[1];
+    this.curBuilding = "house";       // 마지막으로 "도착"한 건물(다음 경로의 출발 문)
+    this.pendingBuilding = null;      // 지금 향하는 목적지 건물
+    this.path = [];                   // 도로 위 남은 경유칸(BFS 결과)
+    this.finalTarget = null;          // 문 → 건물 내부 최종 지점
     this.job = null; this.state = "idle"; this.phase = Math.random() * 6.28;
     this.color = ["#ffe0b2", "#c8e6c9", "#bbdefb", "#f8bbd0", "#ffccbc", "#d1c4e9"][i % 6];
     this._face = 1;
+    // ── 4스탯 (개체차 포함) ──
+    const W = GAME_DATA.worker;
+    this.staminaMax = rollStat(W.stamina);
+    this.regen = rollStat(W.regen);
+    this.satietyMax = rollStat(W.satietyMax);
+    this.eatSpeed = rollStat(W.eatSpeed);
+    this.stamina = this.staminaMax;
+    this.satiety = this.satietyMax;
+    this.need = null;                 // 현재 욕구: "eat" | "rest" | null (히스테리시스)
   }
-  target() {
-    const o = ringOffset(this.i, 0.55);
-    if (this.job) { const t = bdef(this.job).tile; return { gx: t[0] + o.x, gy: t[1] + o.y }; }
-    const c = bdef("campfire").tile; const o2 = ringOffset(this.i, 1.2);
-    return { gx: c[0] + o2.x, gy: c[1] + o2.y };
+  desiredBuilding() {
+    if (this.need === "eat") return "mess";
+    if (this.need === "rest") return "house";
+    return this.job || "manor";        // 배정된 직장, 미배정이면 영주관 앞에서 대기
+  }
+  interiorSpot(buildingId) {
+    const b = bdef(buildingId), center = footCenterGrid(b);
+    const o = ringOffset(this.i, (buildingId === "manor" ? 0.35 : 0.28) * b.size);
+    return { gx: center.gx + o.x, gy: center.gy + o.y };
   }
   tool() { return this.job ? bdef(this.job).tool : null; }
-  update(dt) {
-    if (isNight) {
-      if (this.state !== "sleep") { this.state = "toBed"; if (this.moveTo(this.bed, dt)) this.state = "sleep"; }
-      return;
+  // 욕구 판정: 포만감이 먼저(임계값), 다음 스태미나(바닥)
+  updateNeeds() {
+    const W = GAME_DATA.worker;
+    if (!this.need) {
+      if (this.satiety <= this.satietyMax * W.eatThreshold) this.need = "eat";
+      else if (this.stamina <= 0) this.need = "rest";
     }
-    const tg = this.target();
-    if (this.moveTo(tg, dt)) this.state = this.job ? "work" : "idle";
-    else this.state = "walk";
-    if (this.state === "work") this.phase += dt * 8;
+  }
+  ensureRoute() {
+    const want = this.desiredBuilding();
+    if (this.pendingBuilding === want) return;               // 이미 그쪽으로 가는 중이거나 도착해 있음
+    const from = bdef(this.curBuilding).door, to = bdef(want).door;
+    this.path = bfsPath(from[0], from[1], to[0], to[1]);
+    this.finalTarget = null;
+    this.pendingBuilding = want;
+  }
+  update(dt) {
+    // 포만감은 항상 조금씩 줄어든다
+    this.satiety = Math.max(0, this.satiety - GAME_DATA.worker.satietyDecay * dt);
+    this.updateNeeds();
+    this.ensureRoute();
+    if (this.path.length) {                                  // 1단계: 문→문 도로 이동
+      if (this.moveTo(this.path[0], dt)) this.path.shift();
+      this.state = "walk"; return;
+    }
+    if (!this.finalTarget) this.finalTarget = this.interiorSpot(this.pendingBuilding);
+    const arrived = this.moveTo(this.finalTarget, dt);        // 2단계: 문→건물 내부 짧은 이동
+    this.curBuilding = this.pendingBuilding;
+    if (!arrived) { this.state = "walk"; return; }
+
+    // 도착 — 상태별 행동
+    if (this.need === "eat" && this.curBuilding === "mess") {
+      this.state = "eat";
+      const food = GAME_DATA.food;
+      if ((S.stock[food.id] || 0) > 0) {                     // 식량이 있어야 먹는다
+        const gain = this.eatSpeed * eatMult() * dt;
+        this.satiety = Math.min(this.satietyMax, this.satiety + gain);
+        addStock(food.id, -food.eatCost * dt);
+      }
+      if (this.satiety >= this.satietyMax * 0.999) this.need = null;   // 다 먹었으면 복귀
+    } else if (this.need === "rest" && this.curBuilding === "house") {
+      this.state = "rest";
+      this.stamina = Math.min(this.staminaMax, this.stamina + this.regen * dt);
+      if (this.stamina >= this.staminaMax * 0.999) this.need = null;   // 다 쉬었으면 복귀
+    } else if (this.job && this.curBuilding === this.job) {
+      this.state = "work";
+      this.stamina = Math.max(0, this.stamina - dt);          // 근무 1초 = 스태미나 1
+    } else {
+      this.state = "idle";
+    }
+    const sp = { work: 8, eat: 6 }[this.state]; if (sp) this.phase += dt * sp;
   }
   moveTo(t, dt) {
     const dx = t.gx - this.gx, dy = t.gy - this.gy, d = Math.hypot(dx, dy), step = WALK_SPEED * dt;
     if (d <= step || d < 0.02) { this.gx = t.gx; this.gy = t.gy; return true; }
-    this.gx += dx / d * step; this.gy += dy / d * step; this.phase += dt * 10; return false;
+    this.gx += dx / d * step; this.gy += dy / d * step; this.phase += dt * 10;
+    const fx = iso(t.gx, t.gy).x, cx = iso(this.gx, this.gy).x;
+    if (Math.abs(fx - cx) > 0.5) this._face = fx >= cx ? 1 : -1;
+    return false;
   }
 }
 function syncWorkers() {
@@ -152,19 +273,8 @@ function reassignJobs() {
   workers.forEach((w, i) => (w.job = list[i] || null));
 }
 
-// ── Time ────────────────────────────────────────────────
-let t = DAWN * DAY_LEN + 0.01, day = 1, isNight = false;
-function timeStep(dt) {
-  t += dt; if (t >= DAY_LEN) { t -= DAY_LEN; day++; }
-  const p = t / DAY_LEN;
-  isNight = p >= NIGHT_START || p < DAWN;
-}
-function clockStr() {
-  const p = t / DAY_LEN, hh = Math.floor(p * 24), mm = Math.floor((p * 24 % 1) * 60);
-  return String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0");
-}
-
 // ── Render: 기본 도형 ────────────────────────────────────
+let animT = 0; // 장식 애니메이션용(깃발 등)
 function diamond(cx, cy, w, h) {
   ctx.beginPath(); ctx.moveTo(cx, cy - h / 2); ctx.lineTo(cx + w / 2, cy);
   ctx.lineTo(cx, cy + h / 2); ctx.lineTo(cx - w / 2, cy); ctx.closePath();
@@ -175,65 +285,124 @@ function tile(gx, gy, col) {
   ctx.lineTo(p.x, p.y + TILE_H); ctx.lineTo(p.x - TILE_W / 2, p.y + TILE_H / 2); ctx.closePath();
   ctx.fillStyle = col; ctx.fill(); ctx.strokeStyle = "rgba(0,0,0,0.08)"; ctx.stroke();
 }
+// 칸 좌표 기반 결정적 해시(프레임마다 안 흔들리는 얼룩·잔디술 배치용)
+function hash2(gx, gy) {
+  let h = (gx * 374761393 + gy * 668265263) ^ (gx * 2246822519);
+  h = (h ^ (h >>> 13)) * 1274126177; return (h ^ (h >>> 16)) >>> 0;
+}
+const GRASS_SHADES = ["#6b9b45", "#5f8f3d", "#76a852", "#639148"];
+// 타일 이미지를 마름모 폭에 맞춰 그린다(위쪽 꼭짓점 기준 앵커).
+function drawTileImg(img, gx, gy) {
+  const p = iso(gx, gy), s = TILE_W / img.naturalWidth, dw = img.naturalWidth * s, dh = img.naturalHeight * s;
+  ctx.drawImage(img, p.x - dw / 2, p.y, dw, dh);
+}
+function drawGrassTile(gx, gy) {
+  if (imgReady(GRASS_IMG)) { drawTileImg(GRASS_IMG, gx, gy); return; }
+  const h = hash2(gx, gy);
+  tile(gx, gy, GRASS_SHADES[h % GRASS_SHADES.length]);
+  const p = iso(gx, gy);
+  ctx.fillStyle = "rgba(35,60,25,0.35)";
+  for (let k = 0; k < 2; k++) {
+    const hh = hash2(gx * 131 + k * 17, gy * 89 + k * 31);
+    const ox = ((hh % 100) / 100 - 0.5) * TILE_W * 0.55;
+    const oy = TILE_H * 0.25 + (((hh >>> 8) % 100) / 100) * TILE_H * 0.5;
+    ctx.beginPath(); ctx.ellipse(p.x + ox, p.y + oy, 2.4, 1.3, 0.3, 0, 7); ctx.fill();
+  }
+}
+function drawRoadTile(gx, gy) {
+  if (imgReady(ROAD_IMG)) { drawTileImg(ROAD_IMG, gx, gy); return; }
+  tile(gx, gy, "#b99a6c");
+  const p = iso(gx, gy);
+  ctx.strokeStyle = "rgba(94,68,38,0.35)"; ctx.lineWidth = 2; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(p.x - TILE_W * 0.22, p.y + TILE_H * 0.5); ctx.lineTo(p.x + TILE_W * 0.22, p.y + TILE_H * 0.5); ctx.stroke();
+}
 function drawGround() {
   for (let s = 0; s <= 2 * (GRID - 1); s++)
     for (let gx = 0; gx < GRID; gx++) {
       const gy = s - gx; if (gy < 0 || gy >= GRID) continue;
-      tile(gx, gy, (gx + gy) % 2 === 0 ? "#6b9b45" : "#638f40");
+      const ov = OVERRIDE_IMG[rk(gx, gy)];
+      if (imgReady(ov)) { drawTileImg(ov, gx, gy); continue; }
+      ROAD.has(rk(gx, gy)) ? drawRoadTile(gx, gy) : drawGrassTile(gx, gy);
     }
 }
 
 // ── Render: 건물 스프라이트 ──────────────────────────────
+// 실제 이미지가 있으면 그걸 쓰고(assets.js), 없으면 절차적 도형으로 자리만 잡아둔다(플레이스홀더).
 function drawBuilding(b) {
-  const c = tc(b.tile[0], b.tile[1]);
-  const lv = S.level[b.id];
+  const anchor = footAnchor(b);
+  const img = BUILDING_IMG[b.id];
+  const locked = b.kind === "locked";
+  ctx.save();
+  if (locked) ctx.globalAlpha = 0.55;
+  if (imgReady(img)) {
+    const targetW = b.size * TILE_W * 0.95;
+    const s = targetW / img.naturalWidth, dw = img.naturalWidth * s, dh = img.naturalHeight * s;
+    ctx.drawImage(img, anchor.x - dw / 2, anchor.y - dh + TILE_H * 0.2, dw, dh);
+  } else {
+    ctx.translate(anchor.x, anchor.y);
+    ctx.scale(b.size, b.size);
+    drawBuildingShape(b, S.level[b.id]);
+  }
+  ctx.restore();
+  if (locked) {
+    ctx.fillStyle = "#f4f6fa"; ctx.font = `${16 + b.size * 3}px sans-serif`; ctx.textAlign = "center";
+    ctx.fillText("🔒", anchor.x, anchor.y - 12 * b.size); ctx.textAlign = "left";
+  }
+}
+// 자리(0,0)를 발밑 삼아 그리는 1칸짜리 플레이스홀더. (바깥에서 이미 translate·scale함)
+function drawBuildingShape(b, lv) {
   switch (b.id) {
-    case "campfire": {
-      // 돌 화덕 + 통나무 + 흔들리는 불꽃(레벨=크기)
+    case "manor": {
+      // 돌 성채 실루엣 + 흔들리는 깃발(레벨=크기)
       const s = 1 + (lv - 1) * 0.12;
-      ctx.fillStyle = "#5b5148"; diamond(c.x, c.y, 30 * s, 16 * s); ctx.fill();
-      ctx.strokeStyle = "#6b4a2b"; ctx.lineWidth = 4;
-      ctx.beginPath(); ctx.moveTo(c.x - 8, c.y + 2); ctx.lineTo(c.x + 8, c.y - 2); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(c.x - 8, c.y - 2); ctx.lineTo(c.x + 8, c.y + 2); ctx.stroke();
-      const fl = 12 + Math.sin(t * 9 + b.tile[0]) * 3;
-      const grd = ctx.createLinearGradient(c.x, c.y - fl * s, c.x, c.y);
-      grd.addColorStop(0, "#ffe27a"); grd.addColorStop(1, "#e8631d");
-      ctx.fillStyle = grd;
-      ctx.beginPath(); ctx.moveTo(c.x, c.y - fl * s); ctx.quadraticCurveTo(c.x + 8 * s, c.y - 6, c.x, c.y - 2);
-      ctx.quadraticCurveTo(c.x - 8 * s, c.y - 6, c.x, c.y - fl * s); ctx.fill();
+      ctx.fillStyle = "#6b6a63"; diamond(0, 0, 30 * s, 16 * s); ctx.fill();
+      ctx.fillStyle = "#8b8a82";
+      ctx.fillRect(-14 * s, -30 * s, 28 * s, 30 * s);
+      ctx.fillStyle = "#5f5e57";
+      for (const ox of [-14, 14]) { ctx.fillRect(ox * s - 3 * s, -36 * s, 6 * s, 8 * s); }
+      const wave = Math.sin(animT * 6 + b.tile[0]) * 3;
+      ctx.strokeStyle = "#4a4940"; ctx.lineWidth = 2; ctx.beginPath();
+      ctx.moveTo(0, -30 * s); ctx.lineTo(0, -42 * s); ctx.stroke();
+      ctx.fillStyle = "#3a6bd1";
+      ctx.beginPath(); ctx.moveTo(0, -42 * s); ctx.lineTo(10 * s + wave, -38 * s); ctx.lineTo(0, -34 * s); ctx.closePath(); ctx.fill();
       break;
     }
-    case "house": drawHut(c.x, c.y, "#8a5a2b", "#6b4423"); break;
+    case "house": drawHut(0, 0, "#8a5a2b", "#6b4423"); break;
     case "store": {
       ctx.fillStyle = "#7a5230"; ctx.strokeStyle = "#5c3d22"; ctx.lineWidth = 1.5;
-      for (const [ox, oy] of [[-8, 2], [8, 2], [0, -6]]) { ctx.fillRect(c.x + ox - 9, c.y + oy - 14, 18, 16); ctx.strokeRect(c.x + ox - 9, c.y + oy - 14, 18, 16); }
+      for (const [ox, oy] of [[-8, 2], [8, 2], [0, -6]]) { ctx.fillRect(ox - 9, oy - 14, 18, 16); ctx.strokeRect(ox - 9, oy - 14, 18, 16); }
       break;
     }
     case "lumber": {
-      drawHut(c.x + 6, c.y, "#7d5a34", "#5e4326");
+      drawHut(6, 0, "#7d5a34", "#5e4326");
       ctx.fillStyle = "#8a6a3a"; // 통나무 더미
-      for (const oy of [0, -6, -3]) { ctx.beginPath(); ctx.ellipse(c.x - 14, c.y + oy, 8, 4, 0, 0, 7); ctx.fill(); }
+      for (const oy of [0, -6, -3]) { ctx.beginPath(); ctx.ellipse(-14, oy, 8, 4, 0, 0, 7); ctx.fill(); }
       break;
     }
     case "quarry": {
-      ctx.fillStyle = "#9aa1ab"; ctx.beginPath(); ctx.ellipse(c.x, c.y - 6, 16, 12, 0, 0, 7); ctx.fill();
-      ctx.fillStyle = "#7d848d"; ctx.beginPath(); ctx.ellipse(c.x + 8, c.y, 10, 7, 0, 0, 7); ctx.fill();
-      ctx.fillStyle = "#b3bac2"; ctx.beginPath(); ctx.ellipse(c.x - 8, c.y - 2, 8, 6, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = "#9aa1ab"; ctx.beginPath(); ctx.ellipse(0, -6, 16, 12, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = "#7d848d"; ctx.beginPath(); ctx.ellipse(8, 0, 10, 7, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = "#b3bac2"; ctx.beginPath(); ctx.ellipse(-8, -2, 8, 6, 0, 0, 7); ctx.fill();
       break;
     }
     case "hunter": {
       ctx.fillStyle = "#8d6e4b"; ctx.beginPath(); // 천막
-      ctx.moveTo(c.x, c.y - 26); ctx.lineTo(c.x + 15, c.y + 2); ctx.lineTo(c.x - 15, c.y + 2); ctx.closePath(); ctx.fill();
+      ctx.moveTo(0, -26); ctx.lineTo(15, 2); ctx.lineTo(-15, 2); ctx.closePath(); ctx.fill();
       ctx.strokeStyle = "#5e4a30"; ctx.lineWidth = 2; ctx.beginPath();
-      ctx.moveTo(c.x, c.y - 26); ctx.lineTo(c.x, c.y + 2); ctx.stroke();
+      ctx.moveTo(0, -26); ctx.lineTo(0, 2); ctx.stroke();
       break;
     }
-    case "hall": case "barracks": {
-      ctx.globalAlpha = 0.5; drawHut(c.x, c.y, "#4b556b", "#39415260"); ctx.globalAlpha = 1;
-      ctx.fillStyle = "#cdd6e6"; ctx.font = "14px sans-serif"; ctx.textAlign = "center";
-      ctx.fillText("🔒", c.x, c.y - 8); ctx.textAlign = "left";
+    case "mess": {
+      // 식당: 오두막 + 김 나는 솥
+      drawHut(4, 0, "#9a6a38", "#7a4e28");
+      ctx.fillStyle = "#4a4a52"; ctx.beginPath(); ctx.ellipse(-12, -2, 6, 4, 0, 0, 7); ctx.fill();
+      ctx.strokeStyle = "rgba(230,230,230,0.7)"; ctx.lineWidth = 1.5;
+      const s2 = Math.sin(animT * 3) * 2;
+      ctx.beginPath(); ctx.moveTo(-12, -7); ctx.quadraticCurveTo(-14 + s2, -12, -12, -17); ctx.stroke();
       break;
     }
+    case "hall": drawHut(0, 0, "#5a4a7a", "#453868"); break;
+    case "barracks": drawHut(0, 0, "#4b5a3f", "#39412f"); break;
   }
 }
 // 아이소 오두막(바닥+벽2+박공지붕)
@@ -276,18 +445,20 @@ function drawSpear(gx, gy, ex, ey) {
 }
 function drawWorker(w) {
   const p = iso(w.gx, w.gy), cx = p.x, gy = p.y + TILE_H / 2;
-  if (w.state === "sleep") {
+  if (w.state === "rest") {
+    // 휴식: 누워서 스태미나 충전 (머리 위 z)
     ctx.strokeStyle = "#222"; ctx.lineWidth = 3; ctx.lineCap = "round"; ctx.fillStyle = w.color;
     ctx.beginPath(); ctx.arc(cx - 10, gy - 5, 4.5, 0, 7); ctx.fill(); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(cx - 6, gy - 5); ctx.lineTo(cx + 10, gy - 4); ctx.stroke();
     ctx.fillStyle = "#cfe0ff"; ctx.font = "italic 11px sans-serif"; ctx.fillText("z", cx + 3, gy - 13);
     return;
   }
-  let fx = null; const tg = w.target(); if (tg) fx = iso(tg.gx, tg.gy).x;
-  if (w.state === "work") fx = iso(w.job ? bdef(w.job).tile[0] : w.gx, w.job ? bdef(w.job).tile[1] : w.gy).x;
-  if (fx !== null && Math.abs(fx - cx) > 0.5) w._face = fx >= cx ? 1 : -1;
+  if (w.state === "work" && w.job) {                          // 작업 중엔 자원 쪽을 바라봄
+    const ct = footCenterGrid(bdef(w.job)), fx = iso(ct.gx, ct.gy).x;
+    if (Math.abs(fx - cx) > 0.5) w._face = fx >= cx ? 1 : -1;
+  }
   const face = w._face, hipY = gy - 14, shY = gy - 27, headY = gy - 34;
-  const moving = w.state === "walk" || w.state === "toBed", working = w.state === "work";
+  const moving = w.state === "walk", working = w.state === "work", eating = w.state === "eat";
   ctx.lineCap = "round"; ctx.strokeStyle = "#2b2b2b";
 
   let fLx, fLy, fRx, fRy;
@@ -309,32 +480,33 @@ function drawWorker(w) {
     limb(shX - 2, shY, gxp, gyp, face * 3, 3); limb(shX + 2, shY, gxp, gyp, face * 3, 3);
     const tl = w.tool(); tl === "pick" ? drawPick(gxp, gyp, ex, ey) : tl === "spear" ? drawSpear(gxp, gyp, ex, ey) : drawAxe(gxp, gyp, ex, ey);
     ctx.strokeStyle = "#2b2b2b";
+  } else if (eating) {
+    // 한 손을 입으로 반복(식사 모션) + 음식 알갱이
+    limb(shX, shY, shX - 3 * face, shY + 11, -face * 4, 3);           // 반대 팔은 내림
+    const bite = Math.max(0, Math.sin(w.phase)) * 4;
+    const hx = shX + 4 * face, hy = headY + 3 - bite;
+    limb(shX, shY, hx, hy, face * 4, 3);                             // 입으로
+    ctx.fillStyle = "#c98a3a"; ctx.beginPath(); ctx.arc(hx, hy, 2, 0, 7); ctx.fill();
   } else {
     const sw = moving ? Math.sin(w.phase) * 5 * face : 0;
     limb(shX, shY, shX - sw, shY + 12, -face * 4, 3); limb(shX, shY, shX + sw, shY + 12, face * 4, 3);
   }
   ctx.fillStyle = w.color; ctx.beginPath(); ctx.arc(shX, headY, 5.5, 0, 7); ctx.fill();
   ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(shX, headY, 5.5, 0, 7); ctx.stroke();
+  // 아사 상태 표시
+  if (w.satiety <= 0) { ctx.fillStyle = "#e06a6a"; ctx.font = "10px sans-serif"; ctx.fillText("!", shX + 7, headY - 5); }
 }
 
-// ── Render: 밤 + 합성 ────────────────────────────────────
-function drawNight() {
-  const p = t / DAY_LEN; let a = 0;
-  if (p >= NIGHT_START) a = Math.min(0.55, (p - NIGHT_START) / (1 - NIGHT_START) * 0.7);
-  else if (p < DAWN) a = 0.55;
-  else if (p < DAWN + 0.06) a = 0.55 * (1 - (p - DAWN) / 0.06);
-  if (a > 0.01) { ctx.fillStyle = `rgba(18,26,54,${a})`; ctx.fillRect(0, 0, VIEW_W, VIEW_H); }
-}
 function render() {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0); ctx.clearRect(0, 0, VIEW_W, VIEW_H);
   ctx.setTransform(DPR * WSCALE, 0, 0, DPR * WSCALE, OFFX * DPR, OFFY * DPR);
   drawGround();
   const tall = [];
-  for (const b of GAME_DATA.buildings) tall.push({ d: depth(b.tile[0], b.tile[1]) + 0.1, y: tc(b.tile[0], b.tile[1]).y, fn: () => drawBuilding(b) });
+  for (const b of GAME_DATA.buildings) { const [fx, fy] = footTile(b); tall.push({ d: depth(fx, fy) + 0.1, y: tc(fx, fy).y, fn: () => drawBuilding(b) }); }
   for (const w of workers) tall.push({ d: depth(w.gx, w.gy), y: iso(w.gx, w.gy).y, fn: () => drawWorker(w) });
   tall.sort((a, b) => a.d - b.d || a.y - b.y);
   for (const o of tall) o.fn();
-  ctx.setTransform(DPR, 0, 0, DPR, 0, 0); drawNight();
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
 }
 
 // ── UI: HUD + 탭 + 패널 ──────────────────────────────────
@@ -350,14 +522,19 @@ function costHTML(c) {
     return `<span class="${ok ? "" : "no"}">${r ? r.icon : k} ${fmt(c[k])}</span>`;
   }).join("  ");
 }
+function stateCounts() {
+  const c = { work: 0, rest: 0, eat: 0, walk: 0, idle: 0 };
+  for (const w of workers) c[w.state] = (c[w.state] || 0) + 1;
+  return c;
+}
 
 function updateHUD() {
   const chips = GAME_DATA.resources.map((r) =>
     `<div class="chip"><span class="ico">${r.icon}</span>${fmt(S.stock[r.id] || 0)}<span class="cap">/${fmt(storageCap())}</span></div>`
   ).join("");
   $("#res-chips").innerHTML = chips + (S.hungry ? `<div class="chip" style="color:#e06a6a">⚠️식량부족</div>` : "");
-  $("#era").textContent = `${GAME_DATA.era.badge} ${GAME_DATA.era.name} · Lv${central()}`;
-  $("#clock").textContent = (isNight ? "🌙 " : "☀️ ") + clockStr();
+  $("#era").textContent = `${GAME_DATA.stage.badge} ${GAME_DATA.stage.name} · Lv${manorLevel()}`;
+  $("#pop").textContent = `👥 ${S.pop}/${popCap()}`;
 }
 
 function openTab(tab) {
@@ -382,36 +559,39 @@ function renderPanel() {
 
 function viewRes() {
   const rows = GAME_DATA.resources.map((r) => {
-    const net = netRate(r.id), sign = net >= 0 ? "+" : "";
+    const net = liveRate(r.id), sign = net >= 0 ? "+" : "";
     const col = net >= 0 ? "#7fd18a" : "#e06a6a";
     return `<div class="resrow"><span class="ico">${r.icon}</span><span class="nm">${r.name}</span>
       <span class="amt">${fmt(S.stock[r.id] || 0)} / ${fmt(storageCap())}</span>
       <span class="rate" style="color:${col}">${sign}${net.toFixed(2)}/s</span></div>`;
   }).join("");
+  const c = stateCounts();
   return `<div class="reslist">${rows}</div>
     <p class="note" style="margin-top:12px">인구 <b>${S.pop} / ${popCap()}</b> · 배정 ${assignedTotal()} · 유휴 ${idleWorkers()}<br>
-    ${S.hungry ? "⚠️ 식량이 바닥나 채집 속도가 느려집니다. 사냥터에 일꾼을 늘리세요." : "식량이 충분합니다. 인구가 서서히 늘어납니다."}<br>
-    밤에는 일꾼이 자며 생산이 멈춥니다.</p>`;
+    지금: ${STATE_LABEL.work} ${c.work} · ${STATE_LABEL.rest} ${c.rest} · ${STATE_LABEL.eat} ${c.eat} · ${STATE_LABEL.walk} ${c.walk} · ${STATE_LABEL.idle} ${c.idle}<br>
+    ${S.hungry ? "⚠️ 식량이 바닥났습니다. 배곯은 일꾼은 생산이 뚝 떨어집니다 — 사냥터에 일꾼을 늘리세요." : "식량이 충분합니다. 인구가 서서히 늘어납니다."}<br>
+    일꾼은 각자 스탯대로 삽니다 — 스태미나가 바닥나면 숙소에서 쉬고, 배고프면 식당에서 먹고, 다시 일터로 돌아갑니다. (수치는 현재 순간 기준)</p>`;
 }
 
 function viewBuild() {
-  let html = `<p class="note">인구 <b>${S.pop}/${popCap()}</b> · 유휴 <b>${idleWorkers()}</b> · 건물 레벨 상한 = 화톳불 Lv<b>${central()}</b></p>`;
+  let html = `<p class="note">인구 <b>${S.pop}/${popCap()}</b> · 유휴 <b>${idleWorkers()}</b> · 건물 레벨 상한 = 영주관 Lv<b>${manorLevel()}</b></p>`;
   for (const b of GAME_DATA.buildings) {
     const lv = S.level[b.id];
     const locked = b.kind === "locked";
     const maxed = !locked && lv >= maxLevel(b);
-    const capped = !locked && b.kind !== "central" && lv >= central() && lv < GAME_DATA.era.centralMax;
+    const capped = !locked && b.kind !== "central" && lv >= manorLevel() && lv < GAME_DATA.stage.stageMax;
     const c = locked ? null : b.cost(lv);
     let effect = "";
     if (b.kind === "pop") effect = `인구 상한 ${b.popBase + (lv - 1) * b.popPer} → ${b.popBase + lv * b.popPer}`;
     else if (b.kind === "storage") effect = `저장 한도 ${fmt(b.capBase + (lv - 1) * b.capPer)} → ${fmt(b.capBase + lv * b.capPer)}`;
     else if (b.kind === "prod") effect = `생산 ${(b.rate * lv).toFixed(2)} → ${(b.rate * (lv + 1)).toFixed(2)} /s·일꾼`;
+    else if (b.kind === "service") effect = `식사 속도 +${Math.round((b.eatBonus || 0) * (lv - 1) * 100)}% → +${Math.round((b.eatBonus || 0) * lv * 100)}%`;
     else if (b.kind === "central") effect = `모든 건물 레벨 상한 ${lv} → ${lv + 1}`;
 
     let btn;
     if (locked) btn = `<button class="btn" disabled>🔒 잠김</button>`;
-    else if (maxed) btn = `<button class="btn" disabled>${b.kind === "central" ? "이 시대 최대" : "최대"}</button>`;
-    else if (capped) btn = `<button class="btn" disabled>화톳불 먼저</button>`;
+    else if (maxed) btn = `<button class="btn" disabled>${b.kind === "central" ? "이 단계 최대" : "최대"}</button>`;
+    else if (capped) btn = `<button class="btn" disabled>영주관 먼저</button>`;
     else btn = `<button class="btn js-up" data-id="${b.id}" ${canAfford(c) ? "" : "disabled"}>레벨업</button>`;
 
     const assign = b.kind === "prod" ? `<div class="assign"><span class="note">배정 일꾼</span>
@@ -427,7 +607,7 @@ function viewBuild() {
       ${c ? `<div class="cost">비용 ${costHTML(c)}</div>` : ""}</div>
       <div>${btn}</div></div>${assign}</div>`;
   }
-  html += `<p class="note">다음 시대: <b>${GAME_DATA.era.next}</b> — 관문 스테이지·전환 비용은 원정(v3)과 함께 열립니다.</p>`;
+  html += `<p class="note">다음 단계: <b>${GAME_DATA.stage.next}</b> — 관문 스테이지·승급 비용은 원정과 함께 열립니다.</p>`;
   return html;
 }
 
@@ -435,8 +615,8 @@ function viewExpedition() {
   return `<div class="card"><div class="row"><div class="bico">🏛️</div><div class="info">
     <div class="name">영웅의 전당</div><div class="desc">영웅을 뽑아 주둔시킵니다.</div></div></div></div>
     <div class="card"><div class="row"><div class="bico">⚔️</div><div class="info">
-    <div class="name">원정 막사</div><div class="desc">영웅을 스테이지로 출정시켜 적을 격파하고 전리품·시대 관문을 엽니다.</div></div></div></div>
-    <p class="note">⚔️ 전투·영웅 시스템은 <b>v3</b>에서 열립니다. 지금은 자원을 모으고 마을을 키워두세요.</p>`;
+    <div class="name">원정 막사</div><div class="desc">영웅을 스테이지로 출정시켜 적을 격파하고 승급 관문을 엽니다.</div></div></div></div>
+    <p class="note">⚔️ 전투·영웅 시스템은 <b>v5</b>에서 열립니다. 지금은 자원을 모으고 마을을 키워두세요.</p>`;
 }
 
 function bindPanel() {
@@ -452,7 +632,8 @@ $("#panel-close").onclick = closePanel;
 let last = 0, uiT = 0;
 function frame(ts) {
   const dt = Math.min(0.05, (ts - last) / 1000 || 0); last = ts;
-  timeStep(dt); economyStep(dt);
+  animT += dt;
+  economyStep(dt);
   for (const w of workers) w.update(dt);
   render();
   uiT += dt; if (uiT >= 0.25) { uiT = 0; updateHUD(); if (curTab !== "village") refreshPanel(); }
