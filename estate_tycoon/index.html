@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#1a2438" />
+  <title>estate tycoon</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="hud">
+    <button id="edit-btn">🔧 편집</button>
+    <div id="res-chips"></div>
+    <div class="sep"></div>
+    <div class="stat" id="castle-lv">🏰 Lv.1</div>
+  </div>
+
+  <canvas id="game"></canvas>
+
+  <!-- 건물 이동 모드 컨트롤 -->
+  <div id="move-ctl" class="hidden">
+    <button id="mv-rotate">🔄 회전</button>
+    <button id="mv-ok">✓ 확인</button>
+    <button id="mv-cancel">✕ 취소</button>
+  </div>
+
+  <!-- 탭 오버레이 패널 -->
+  <div id="panel" class="hidden">
+    <div id="panel-head"><span id="panel-title"></span><button id="panel-close">✕</button></div>
+    <div id="panel-body"></div>
+  </div>
+
+  <!-- 하단 탭바 -->
+  <nav id="tabbar">
+    <button class="tab" data-tab="build"><span>🏗️</span>건설</button>
+    <button class="tab" data-tab="res"><span>📦</span>자원</button>
+    <button class="tab active" data-tab="estate"><span>🏠</span>영지</button>
+    <button class="tab" data-tab="market"><span>💰</span>시장</button>
+    <button class="tab" data-tab="option"><span>⚙️</span>옵션</button>
+  </nav>
+
+  <div id="toast" class="hidden"></div>
+  <input type="file" id="import-file" accept=".json,application/json" style="display:none" />
+
+  <script src="data.js"></script>
+  <script src="assets.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
