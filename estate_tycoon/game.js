@@ -14,11 +14,18 @@ let DPR = 1, W = 0, H = 0;
 
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 3);
-  W = window.innerWidth; H = window.innerHeight;
+  // 캔버스가 화면에 실제로 렌더된 크기를 기준으로 잡는다.
+  // window.innerHeight를 쓰면 모바일에서 주소창 높이만큼 CSS(100vh/dvh)와 어긋나
+  // 그림과 터치 좌표가 세로로 밀린다.
+  const r = canvas.getBoundingClientRect ? canvas.getBoundingClientRect() : null;
+  W = (r && r.width) || window.innerWidth;
+  H = (r && r.height) || window.innerHeight;
   canvas.width = Math.round(W * DPR);
   canvas.height = Math.round(H * DPR);
 }
 window.addEventListener("resize", resize);
+// 모바일 주소창이 나타나거나 사라질 때도 다시 맞춘다
+if (window.visualViewport) window.visualViewport.addEventListener("resize", resize);
 resize();
 
 /* ═══════════════ 게임 상태 ═══════════════ */

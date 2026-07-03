@@ -12,6 +12,11 @@ html, body {
 }
 
 #game { display: block; width: 100vw; height: 100vh; }
+/* 모바일: 주소창을 뺀 "실제 보이는 높이"(dvh)를 쓴다 — 100vh는 주소창 뒤 영역까지 포함해서
+   그림과 터치 좌표가 어긋난다 */
+@supports (height: 100dvh) {
+  #game { height: 100dvh; }
+}
 
 /* ── 상단 HUD ── */
 #hud {
