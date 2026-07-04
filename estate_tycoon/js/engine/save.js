@@ -47,6 +47,19 @@ function applySave(obj) {
   fresh.nextIid = Math.max(d.nextIid || 1, maxIid + 1);
   if (Array.isArray(d.land) && d.land.length) fresh.land = d.land.filter(k => typeof k === "string");
   if (d.tiles && typeof d.tiles === "object") fresh.tiles = d.tiles;
+  // 동적 가격 상태 복원(있으면). 없으면 freshState의 기본(배수 전부 1)
+  if (d.market && typeof d.market === "object") {
+    const dm = d.market;
+    fresh.market = {
+      mult: {}, hist: {}, pending: [],
+      step: dm.step | 0,
+      seed: (dm.seed >>> 0) || fresh.market.seed,
+      ts: +dm.ts || Date.now(),
+    };
+    if (dm.mult && typeof dm.mult === "object") for (const k in dm.mult) { const v = +dm.mult[k]; if (isFinite(v) && v > 0) fresh.market.mult[k] = v; }
+    if (dm.hist && typeof dm.hist === "object") for (const k in dm.hist) if (Array.isArray(dm.hist[k])) fresh.market.hist[k] = dm.hist[k].map(Number).filter(isFinite);
+    if (Array.isArray(dm.pending)) fresh.market.pending = dm.pending.filter(p => p && GAME_DATA.market.prices[p.res] != null && isFinite(+p.amount)).map(p => ({ res: p.res, amount: +p.amount, at: p.at | 0 }));
+  }
   fresh.createdTs = d.createdTs || Date.now();
   state = fresh;
   syncLand();
@@ -63,6 +76,56 @@ function applySave(obj) {
 }
 function lsSet(key, obj) { try { localStorage.setItem(key, JSON.stringify(obj)); return true; } catch (e) { return false; } }
 function lsGet(key) { try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : null; } catch (e) { return null; } }
+
+/* ── 배경음(BGM) ──
+   HTMLAudio 로 루프 재생. 브라우저 자동재생 정책 때문에 접속 후 "첫 사용자 입력"에서 시작한다.
+   켜기/끄기 상태는 localStorage 에 저장(기본 켜짐). standalone 때는 EMBEDDED_ASSETS 에서 데이터를 찾는다. */
+const BGM_KEY = SKEY + "_bgm";
+let bgmAudio = null;
+function bgmSrc() {
+  const p = (GAME_DATA.audio && GAME_DATA.audio.bgm) || "";
+  return (window.EMBEDDED_ASSETS && window.EMBEDDED_ASSETS[p]) || p;
+}
+function bgmEnabled() {
+  const v = lsGet(BGM_KEY);
+  return v == null ? true : v === "on";  // 저장 없으면 기본 켜짐
+}
+function ensureBgm() {
+  if (bgmAudio || typeof Audio === "undefined") return;  // 헤드리스 테스트 가드
+  const cfg = GAME_DATA.audio;
+  if (!cfg || !cfg.bgm) return;
+  bgmAudio = new Audio();
+  bgmAudio.loop = true;
+  bgmAudio.volume = cfg.volume != null ? cfg.volume : 0.4;
+  bgmAudio.preload = "auto";
+  bgmAudio.src = bgmSrc();
+}
+function playBgm() {
+  ensureBgm();
+  if (!bgmAudio) return;
+  const pr = bgmAudio.play();
+  if (pr && pr.catch) pr.catch(() => {});  // 자동재생 차단 시 조용히 무시(다음 입력에서 재시도)
+}
+function pauseBgm() { if (bgmAudio) bgmAudio.pause(); }
+function setBgm(on) {
+  lsSet(BGM_KEY, on ? "on" : "off");
+  if (on) playBgm(); else pauseBgm();
+  refreshPanel();
+  toast(on ? "🔊 배경음 켜짐" : "🔇 배경음 꺼짐");
+}
+// 첫 사용자 입력에서 (켜져 있으면) 배경음 시작 — 모바일 자동재생 제약 회피
+function armBgmAutostart() {
+  if (typeof window === "undefined" || !window.addEventListener) return;
+  const start = () => {
+    window.removeEventListener("pointerdown", start);
+    window.removeEventListener("keydown", start);
+    window.removeEventListener("touchstart", start);
+    if (bgmEnabled()) playBgm();
+  };
+  window.addEventListener("pointerdown", start);
+  window.addEventListener("keydown", start);
+  window.addEventListener("touchstart", start);
+}
 
 function autoSave() {
   if (lsSet(SKEY + "_auto", serialize())) lastAutoTs = Date.now();
@@ -86,7 +149,11 @@ function slotMetaHTML(label, obj, n, canSave) {
     <button class="btn alt" data-act="loadslot:${n}" ${obj ? "" : "disabled"}>불러오기</button></div>`;
 }
 function saveTabHTML() {
-  let html = `<div class="note" style="margin-bottom:8px">자동저장: ${GAME_DATA.save.autosaveSec}초마다${lastAutoTs ? ` · 마지막 ${new Date(lastAutoTs).toLocaleTimeString("ko-KR")}` : ""}</div>`;
+  const bgmOn = bgmEnabled();
+  let html = `<div class="card"><div class="name" style="margin-bottom:6px">🎵 배경음</div>
+    <div class="note">잔잔한 배경 음악을 켜고 끈다.</div>
+    <button class="btn ${bgmOn ? "" : "alt"} wide" data-act="bgm:toggle">${bgmOn ? "🔊 배경음 켜짐 — 누르면 끔" : "🔇 배경음 꺼짐 — 누르면 켬"}</button></div>`;
+  html += `<div class="note" style="margin-bottom:8px">자동저장: ${GAME_DATA.save.autosaveSec}초마다${lastAutoTs ? ` · 마지막 ${new Date(lastAutoTs).toLocaleTimeString("ko-KR")}` : ""}</div>`;
   html += slotMetaHTML("⏱️ 자동저장", lsGet(SKEY + "_auto"), "auto", false);
   for (let n = 1; n <= GAME_DATA.save.slots; n++) {
     html += slotMetaHTML(`슬롯 ${n}`, lsGet(`${SKEY}_slot${n}`), n, true);
@@ -172,6 +239,7 @@ async function exportStandalone() {
       const acfg = autoCfg(t);
       if (acfg) for (const f of autoFileList(acfg)) urls.add(f);
     }
+    if (GAME_DATA.audio && GAME_DATA.audio.bgm) urls.add(GAME_DATA.audio.bgm);  // 배경음도 임베드
     const assets = {};
     await Promise.all([...urls].map(async u => {
       const blob = await fetch(u).then(r => { if (!r.ok) throw new Error(u); return r.blob(); });
@@ -212,6 +280,9 @@ async function exportStandalone() {
     setEditMode(true);
     toast("보관함에 놓지 않은 건물이 있다 — 배치해 주세요");
   }
+  // 배경음: 켜져 있으면 재생 시도(자동재생 차단 대비 첫 입력에서도 시작)
+  if (bgmEnabled()) playBgm();
+  armBgmAutostart();
 })();
 
 document.addEventListener("visibilitychange", () => { if (document.hidden) autoSave(); });

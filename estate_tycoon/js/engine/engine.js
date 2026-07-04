@@ -51,13 +51,19 @@ function addBuilding(st, type, gx, gy, dir) {
 function freshState() {
   const st = {
     version: GAME_DATA.version,
-    res: Object.assign({}, START.resources),
+    // 모든 자원키를 0으로 깔고 START.resources 로 덮어쓴다(data.js에 자원을 추가해도 안 깨지게)
+    res: Object.assign(
+      Object.fromEntries(Object.keys(GAME_DATA.resources).map(k => [k, 0])),
+      START.resources
+    ),
     buildings: [],
     nextIid: 1,
     land: START.openChunks.map(([cx, cy]) => cx + "," + cy), // 개방된 청크 키
     // 칠한 지형: "gx,gy" → "road" | "water". 시작 지형(START.tiles)을 복사해서 깐다.
     tiles: Object.assign({}, START.tiles || {}),
     held: [],   // 편집 모드 보관함에 담긴 건물들 (맵에서 잠시 치운 것)
+    // 동적 가격 상태: 배수(mult)·이전 스텝 기록(hist)·시차 전파 예약(pending)·스텝수·시드(결정론)·마지막 스텝 시각
+    market: { mult: {}, hist: {}, pending: [], step: 0, seed: (Date.now() >>> 0) || 1, ts: Date.now() },
     createdTs: Date.now(),
   };
   for (const sb of START.buildings) addBuilding(st, sb.type, sb.gx, sb.gy, sb.dir);
@@ -277,7 +283,7 @@ function npcFileList() {
   const npcs = GAME_DATA.npcs || {};
   for (const type in npcs) {
     const n = npcs[type];
-    for (const nm of [].concat(n.idle || [], n.walk || [])) out.push(n.base + "/" + nm + ".png");
+    for (const nm of [].concat(n.idle || [], n.walk || [], n.work || [])) out.push(n.base + "/" + nm + ".png");
   }
   return out;
 }

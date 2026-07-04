@@ -28,7 +28,7 @@ html, body {
   font-size: 15px; font-weight: 700;
   pointer-events: none; z-index: 10;
 }
-#hud #edit-btn {
+#hud #edit-btn, #hud #option-btn {
   pointer-events: auto;
   border: 1px solid #2c3a56; background: #1b2440; color: #cdd6e6;
   border-radius: 9px; padding: 6px 10px;
@@ -123,14 +123,68 @@ html, body {
 .recipebtns .btn { display: flex; justify-content: space-between; gap: 10px; background: #34507e; }
 .recipebtns .btn .t { opacity: 0.8; font-weight: 600; }
 
+/* 생산 레시피 (생산품 1줄 + 소·중·대 버튼) */
+.recipe { background: #16203a; border: 1px solid #2a3654; border-radius: 10px; padding: 10px; margin-top: 8px; }
+.recipe.locked { opacity: 0.55; }
+.recipe .rname { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; font-weight: 800; }
+.recipe .rname .t { color: #9aa6bd; font-size: 11px; font-weight: 600; text-align: right; }
+/* 재료 칩 (이모티콘(이름)×수량) — 길면 다음 줄로 */
+.rmats { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.rmats .mat {
+  font-size: 12px; font-weight: 700; color: #cdd6e6;
+  background: #0f1830; border: 1px solid #2a3654; border-radius: 8px; padding: 4px 8px;
+  white-space: nowrap;
+}
+.rmats .mat.none { color: #7c8bb0; font-weight: 600; background: transparent; border-color: transparent; }
+.rmats .mat.hint { color: #7c8bb0; font-weight: 600; background: transparent; border-color: transparent; padding-left: 0; }
+.tierbtns { display: flex; gap: 6px; margin-top: 8px; }
+.tbtn {
+  flex: 1; border: none; border-radius: 9px; padding: 8px 4px; cursor: pointer;
+  background: #34507e; color: #e6efff; font-family: inherit;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+}
+.tbtn:disabled { background: #2a3654; color: #5c6883; }
+.tbtn .tt { font-size: 12px; font-weight: 800; }
+.tbtn .to { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tbtn .td { font-size: 10px; opacity: 0.75; }
+
 /* 판매 폼 */
 .sellform { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+/* 판매 단계 탭(1차/2차/3차) */
+.subtabs { display: flex; gap: 6px; }
+.subtab {
+  flex: 1; border: 1px solid #2a3654; border-radius: 8px 8px 0 0; background: #16203a;
+  color: #9aa6bd; font-family: inherit; font-size: 13px; font-weight: 800; padding: 8px 0; cursor: pointer;
+}
+.subtab.on { background: #34507e; color: #fff; border-color: #5b8def; }
 .pickrow { display: flex; gap: 6px; flex-wrap: wrap; }
 .pick {
   flex: 1 1 30%; border: 1px solid #2a3654; border-radius: 8px; background: #1b2440;
   color: #cdd6e6; font-family: inherit; font-size: 13px; font-weight: 700; padding: 8px 0; cursor: pointer;
 }
 .pick.on { background: #34507e; color: #fff; border-color: #5b8def; }
+.pick .pprice { display: block; font-size: 11px; font-weight: 700; color: #c7d0e2; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.pick .pprice .up { color: #6fcf7f; margin-left: 2px; }
+.pick .pprice .down { color: #e06a6a; margin-left: 2px; }
+/* 거래 불가(생산 불가) 품목 — 시세만 열람 */
+.pick.cantmake { opacity: 0.5; }
+.pick.cantmake::before { content: "🔒 "; }
+/* 매도/매수 토글 */
+.modetoggle { display: flex; gap: 8px; margin-bottom: 8px; }
+.mtog { flex: 1; border: 1px solid #2a3654; border-radius: 9px; background: #16203a; color: #9aa6bd;
+  font-family: inherit; font-size: 14px; font-weight: 800; padding: 9px 0; cursor: pointer; }
+.mtog.on { background: #3a6b3a; color: #eafbea; border-color: #4f9a4f; }
+.mtog.buy.on { background: #34507e; color: #e6efff; border-color: #5b8def; }
+/* 선택 품목 헤더 + 현재가 */
+.psel { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
+.psel .pname { font-size: 14px; font-weight: 800; }
+.psel .pnow { font-size: 11px; color: #9aa6bd; font-variant-numeric: tabular-nums; }
+/* 시세 그래프 */
+.pgraphwrap { margin-top: 6px; background: #0f1830; border: 1px solid #2a3654; border-radius: 10px; padding: 6px 8px; }
+.pgraph { display: block; width: 100%; height: 56px; }
+.pglabel { font-size: 11px; font-weight: 700; color: #9aa6bd; text-align: right; margin-top: 2px; }
+.pglabel .up { color: #6fcf7f; }
+.pglabel .down { color: #e06a6a; }
 .qtyrow { display: flex; align-items: center; gap: 6px; }
 .qtyrow button {
   border: none; border-radius: 8px; background: #34507e; color: #fff;
