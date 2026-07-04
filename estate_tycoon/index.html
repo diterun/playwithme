@@ -19,7 +19,21 @@
 
   <canvas id="game"></canvas>
 
-  <!-- 건물 이동 모드 컨트롤: 방향 패드(가운데 회전) + 확인/취소 -->
+  <!-- 편집 모드 지형 브러시 -->
+  <div id="paint-bar" class="hidden">
+    <button data-brush="" class="active">✋ 선택</button>
+    <button data-brush="grass">🌿 땅</button>
+    <button data-brush="road">🛣️ 도로</button>
+    <button data-brush="water">🌊 물</button>
+  </div>
+
+  <!-- 편집 모드 보관함: 건물을 담아 맵을 비우고 바닥을 꾸민 뒤 다시 꺼내 배치 -->
+  <div id="box-bar" class="hidden">
+    <span id="box-label">📦 보관함</span>
+    <div id="box-items"></div>
+  </div>
+
+  <!-- 건물 이동 모드 컨트롤: 방향 패드(가운데 회전) + 보관/확인/취소 -->
   <div id="move-ctl" class="hidden">
     <div id="mv-dpad">
       <button id="mv-nw">↖</button>
@@ -29,6 +43,7 @@
       <button id="mv-se">↘</button>
     </div>
     <div id="mv-actions">
+      <button id="mv-store">📦 보관</button>
       <button id="mv-ok">✓ 확인</button>
       <button id="mv-cancel">✕ 취소</button>
     </div>
@@ -52,8 +67,18 @@
   <div id="toast" class="hidden"></div>
   <input type="file" id="import-file" accept=".json,application/json" style="display:none" />
 
-  <script src="data.js"></script>
-  <script src="assets.js"></script>
-  <script src="game.js"></script>
+  <!-- 밸런스·초기상태·그림 (여기 데이터만 고치면 게임이 바뀐다) -->
+  <script src="js/data.js"></script>
+  <script src="js/start.js"></script>
+  <script src="js/assets.js"></script>
+  <!-- 엔진 (역할별 분할 — 아래 순서대로 로드) -->
+  <script src="js/engine/engine.js"></script>
+  <script src="js/engine/render.js"></script>
+  <script src="js/engine/input.js"></script>
+  <script src="js/engine/economy.js"></script>
+  <script src="js/engine/edit.js"></script>
+  <script src="js/engine/npc.js"></script>
+  <script src="js/engine/ui.js"></script>
+  <script src="js/engine/save.js"></script>
 </body>
 </html>

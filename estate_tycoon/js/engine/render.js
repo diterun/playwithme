@@ -1,0 +1,311 @@
+// estate_tycoon — 그리기 (바닥 프리렌더 + 건물·지형지물·유령·발판 렌더)
+"use strict";
+
+/* ═══════════════ 지형 (오프스크린 프리렌더) ═══════════════ */
+function hash2(x, y) {
+  let h = (x * 374761393 + y * 668265263) | 0;
+  h = (h ^ (h >> 13)) * 1274126177 | 0;
+  return ((h ^ (h >> 16)) >>> 0) / 4294967296;
+}
+const GPAD = 24, GSCALE = 1.5;
+const G_X0 = -MAP_H * TILE_W / 2 - GPAD;
+const G_Y0 = -GPAD;
+const G_W = (MAP_W + MAP_H) * TILE_W / 2 + GPAD * 2;
+const G_H = (MAP_W + MAP_H) * TILE_H / 2 + GPAD * 2;
+let groundCanvas = null;
+
+function buildGround() {
+  if (typeof document.createElement !== "function") return;
+  const gc = document.createElement("canvas");
+  gc.width = Math.round(G_W * GSCALE); gc.height = Math.round(G_H * GSCALE);
+  const g = gc.getContext("2d");
+  if (!g) return;
+  g.setTransform(GSCALE, 0, 0, GSCALE, -G_X0 * GSCALE, -G_Y0 * GSCALE);
+  const cols = ["#4c7a3f", "#527f43", "#478040", "#4a7d45"];
+  const gset = ASSET_MAP.ground || {};
+  const tsc = gset.tileScale || 1.0;
+  const tft = gset.tileFoot != null ? gset.tileFoot : 1.0;
+  const tanchor = gset.tileAnchor || "bottom";
+  for (let gy = 0; gy < MAP_H; gy++) {
+    for (let gx = 0; gx < MAP_W; gx++) {
+      const cx = isoX(gx, gy), cy = isoY(gx, gy);
+      // 우선순위: 플레이어가 칠한 지형 → assets.js 칸별 override → 기본 잔디 → 절차적
+      const painted = state.tiles[gx + "," + gy];
+      // 오토타일(물·도로): 이웃을 보고 연결표(assets.js waterAuto/landAuto.tiles)에서 그림을 고른다 (+오목 모서리 조각)
+      const acfg = painted && AUTO_KEY[painted] ? autoCfg(painted) : null;
+      if (acfg) {
+        const m = autoMaskAt(painted, gx, gy);
+        const cm = autoCornerMaskAt(painted, gx, gy);
+        const tw = TILE_W * tsc;
+        // 1순위: 모서리 조합까지 구워진 파일 ({접두어}_o{변}_c{모서리}.png)
+        const comp = cm ? getImg(autoCompositeFile(acfg, m, cm)) : null;
+        if (imgOK(comp)) {
+          g.drawImage(comp, cx - tw / 2, cy, tw, tw * (comp.naturalHeight / comp.naturalWidth));
+          continue;
+        }
+        // 2순위: 기본 타일 + 오목 조각 실시간 겹치기
+        const base = getImg(autoTileFile(acfg, m));
+        if (imgOK(base)) {
+          g.drawImage(base, cx - tw / 2, cy, tw, tw * (base.naturalHeight / base.naturalWidth));
+          for (let i = 0; i < AUTO_NIBS.length; i++) {
+            if (cm & (1 << i)) {
+              const nib = getImg(autoNibFile(acfg, AUTO_NIBS[i][0]));
+              if (imgOK(nib)) g.drawImage(nib, cx - tw / 2, cy, tw, tw * (nib.naturalHeight / nib.naturalWidth));
+            }
+          }
+          continue;
+        }
+      }
+      const ov = painted ? null : groundOverrideAt(gx, gy);
+      const url = painted ? paintTileURL(painted) : groundTileURL(gx, gy);
+      const timg = getImg(url);
+      if (imgOK(timg)) {
+        const sc = (ov && ov.scale) || tsc;
+        const anchor = (ov && ov.anchor) || tanchor;
+        const ft = (ov && ov.foot != null) ? ov.foot : tft;
+        const tw = TILE_W * sc;
+        const th = tw * (timg.naturalHeight / timg.naturalWidth);
+        let ty = anchor === "top" ? cy : cy + TILE_H - th * ft;
+        // 물은 아래로 가라앉혀 그린다 — 북쪽 이웃의 흙벽이 드러나 웅덩이처럼 보임
+        if (painted === "water") ty += gset.waterSink != null ? gset.waterSink : 10;
+        g.drawImage(timg, cx - tw / 2, ty, tw, th);
+        continue;
+      }
+      if (painted) {
+        // 그림이 아직 안 실렸으면 색으로 표시
+        const sink = painted === "water" ? (gset.waterSink != null ? gset.waterSink : 10) : 0;
+        g.fillStyle = painted === "water" ? "#3f6fae" : "#b99a6c";
+        g.beginPath();
+        g.moveTo(cx, cy + sink);
+        g.lineTo(cx + TILE_W / 2, cy + TILE_H / 2 + sink);
+        g.lineTo(cx, cy + TILE_H + sink);
+        g.lineTo(cx - TILE_W / 2, cy + TILE_H / 2 + sink);
+        g.closePath();
+        g.fill();
+        continue;
+      }
+      g.fillStyle = cols[Math.floor(hash2(gx, gy) * cols.length)];
+      g.beginPath();
+      g.moveTo(cx, cy);
+      g.lineTo(cx + TILE_W / 2, cy + TILE_H / 2);
+      g.lineTo(cx, cy + TILE_H);
+      g.lineTo(cx - TILE_W / 2, cy + TILE_H / 2);
+      g.closePath();
+      g.fill();
+      if (hash2(gx * 7 + 3, gy * 5 + 1) > 0.72) {
+        const tx = cx + (hash2(gx, gy * 3) - 0.5) * 30;
+        const ty2 = cy + TILE_H / 2 + (hash2(gx * 2, gy) - 0.5) * 10;
+        g.strokeStyle = "#3a6631"; g.lineWidth = 1.2;
+        g.beginPath();
+        g.moveTo(tx - 2, ty2 + 3); g.lineTo(tx - 3, ty2 - 3);
+        g.moveTo(tx, ty2 + 3); g.lineTo(tx, ty2 - 4);
+        g.moveTo(tx + 2, ty2 + 3); g.lineTo(tx + 3, ty2 - 3);
+        g.stroke();
+      }
+    }
+  }
+  g.strokeStyle = "rgba(255,255,255,0.25)"; g.lineWidth = 2;
+  g.beginPath();
+  g.moveTo(isoX(0, 0), isoY(0, 0));
+  g.lineTo(isoX(MAP_W, 0), isoY(MAP_W, 0));
+  g.lineTo(isoX(MAP_W, MAP_H), isoY(MAP_W, MAP_H));
+  g.lineTo(isoX(0, MAP_H), isoY(0, MAP_H));
+  g.closePath();
+  g.stroke();
+  groundCanvas = gc;
+}
+
+/* ═══════════════ 그리기 조각 ═══════════════ */
+function footDiamond(g, gx, gy, fw, fh) {
+  g.beginPath();
+  g.moveTo(isoX(gx, gy), isoY(gx, gy));
+  g.lineTo(isoX(gx + fw, gy), isoY(gx + fw, gy));
+  g.lineTo(isoX(gx + fw, gy + fh), isoY(gx + fw, gy + fh));
+  g.lineTo(isoX(gx, gy + fh), isoY(gx, gy + fh));
+  g.closePath();
+}
+function dirVal(v, dir, def) {
+  if (v == null) return def;
+  if (typeof v === "object") return v[dir] != null ? v[dir] : def;
+  return v;
+}
+function spriteRect(type, gx, gy, dir) {
+  const d = bdef(type);
+  const f = footDims(type, dir);
+  const isoW = (f.w + f.h) * TILE_W / 2;
+  const tw = isoW * dirVal(d.imgScale, dir, 1.5);
+  const th = tw; // 렌더 PNG는 정사각형
+  const cx = (isoX(gx + f.w, gy) + isoX(gx, gy + f.h)) / 2;
+  const footY = isoY(gx + f.w, gy + f.h);
+  return {
+    x: cx - tw / 2 + dirVal(d.imgDX, dir, 0),
+    y: footY - th * dirVal(d.imgFoot, dir, 0.9) + dirVal(d.imgDY, dir, 0),
+    w: tw, h: th, cx, footY, f,
+  };
+}
+function drawB(g, type, gx, gy, dir, alpha, invalid) {
+  const d = bdef(type);
+  const r = spriteRect(type, gx, gy, dir);
+  g.globalAlpha = alpha;
+  if (invalid !== undefined) {
+    // 이동 중인 유령: 발판 색칠 + debug식 테두리·기준점
+    g.fillStyle = invalid ? "rgba(220,60,60,0.4)" : "rgba(80,220,110,0.35)";
+    footDiamond(g, gx, gy, r.f.w, r.f.h);
+    g.fill();
+    g.strokeStyle = "#ffe14d"; g.lineWidth = 2 / cam.s;
+    footDiamond(g, gx, gy, r.f.w, r.f.h);
+    g.stroke();
+    g.fillStyle = "#ff5d5d";
+    g.beginPath();
+    g.arc(isoX(gx, gy), isoY(gx, gy), 4 / cam.s, 0, Math.PI * 2);
+    g.fill();
+  }
+  const img = getImg(buildingImgURL(type, dir));
+  if (imgOK(img)) {
+    g.drawImage(img, r.x, r.y, r.w, r.h);
+  } else {
+    g.fillStyle = "rgba(90,80,60,0.85)";
+    footDiamond(g, gx, gy, r.f.w, r.f.h);
+    g.fill();
+    g.fillStyle = "#fff";
+    g.font = "28px sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText(d.icon, r.cx, r.footY - (r.f.w + r.f.h) * TILE_H / 4);
+  }
+  g.globalAlpha = 1;
+}
+// 잠긴 청크의 숲: 4×4 청크 하나에 2×2 나무 뭉치 4개 (방향은 칸 해시로 섞음)
+function drawTreeQuad(g, qx, qy) {
+  const di = Math.floor(hash2(qx * 3 + 7, qy * 5 + 11) * 4);
+  const img = getImg(GAME_DATA.land.treeImg + "_" + DIRS[di] + ".png");
+  const cx = (isoX(qx + 2, qy) + isoX(qx, qy + 2)) / 2;
+  const footY = isoY(qx + 2, qy + 2);
+  if (imgOK(img)) {
+    const tw = 2 * TILE_W * (GAME_DATA.land.treeScale || 1.4);
+    g.drawImage(img, cx - tw / 2, footY - tw * (GAME_DATA.land.treeFoot || 0.9), tw, tw);
+  } else {
+    g.fillStyle = "rgba(38,84,46,0.9)";
+    footDiamond(g, qx, qy, 2, 2);
+    g.fill();
+  }
+}
+
+function drawFeature(g, ft) {
+  const img = ft.img ? getImg(ft.img) : null;
+  const cx = isoX(ft.gx, ft.gy);
+  const by = isoY(ft.gx, ft.gy) + TILE_H;
+  if (imgOK(img)) {
+    const tw = TILE_W * ft.scale;
+    const th = tw * (img.naturalHeight / img.naturalWidth);
+    g.drawImage(img, cx - tw / 2 + ft.dx, by - th * ft.foot + ft.dy, tw, th);
+  } else if (ft.img) {
+    g.fillStyle = "rgba(60,90,50,0.6)";
+    footDiamond(g, ft.gx, ft.gy, 1, 1);
+    g.fill();
+  }
+}
+
+// 집 위 💰 표시 위치 (그리기·탭 판정 공용, 월드 좌표)
+function houseIconPos(b) {
+  const r = spriteRect(b.type, b.gx, b.gy, b.dir);
+  return { x: r.x + r.w / 2, y: r.y + r.h * 0.12 };
+}
+function houseIconVisible(b) {
+  return isHouse(b.type) && b.accum >= bdef(b.type).house.showAt;
+}
+
+function render() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "#1a2438";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(DPR * cam.s, 0, 0, DPR * cam.s, DPR * (W / 2 - cam.x * cam.s), DPR * (H / 2 - cam.y * cam.s));
+  ctx.imageSmoothingEnabled = true;
+
+  if (groundCanvas) ctx.drawImage(groundCanvas, G_X0, G_Y0, G_W, G_H);
+
+  // 건물 + 지형지물을 남쪽 깊이 순으로 함께 그림
+  const items = [];
+  for (const b of state.buildings) {
+    const f = footDims(b.type, b.dir);
+    items.push({
+      depth: b.gx + b.gy + f.w + f.h,
+      draw: () => drawB(ctx, b.type, b.gx, b.gy, b.dir, moveMode && moveMode.iid === b.iid ? 0.25 : 1),
+    });
+  }
+  for (const ft of FEATURES) {
+    items.push({ depth: ft.gx + ft.gy + 2, draw: () => drawFeature(ctx, ft) });
+  }
+  // 돌아다니는 NPC (건물·지형지물과 같은 깊이 정렬에 섞어 그린다)
+  if (typeof NPCS !== "undefined") for (const n of NPCS) {
+    items.push({ depth: n.fx + n.fy + 1, draw: () => drawNpc(ctx, n) });
+  }
+  // 잠긴 청크의 숲 (화면에 보이는 것만 — 컬링)
+  const vhw = W / (2 * cam.s) + 200, vhh = H / (2 * cam.s) + 250;
+  for (let cy = 0; cy < CHUNKS_Y; cy++) {
+    for (let cx = 0; cx < CHUNKS_X; cx++) {
+      if (LAND.has(cx + "," + cy)) continue;
+      const bx = cx * CHUNK, by = cy * CHUNK;
+      const px = isoX(bx + 2, by + 2), py = isoY(bx + 2, by + 2);
+      if (px < cam.x - vhw || px > cam.x + vhw || py < cam.y - vhh || py > cam.y + vhh) continue;
+      for (const [ox, oy] of [[0, 0], [2, 0], [0, 2], [2, 2]]) {
+        const qx = bx + ox, qy = by + oy;
+        items.push({ depth: qx + qy + 4, draw: () => drawTreeQuad(ctx, qx, qy) });
+      }
+    }
+  }
+  items.sort((a, b) => a.depth - b.depth);
+  for (const it of items) it.draw();
+
+  // 집 위 금화 표시: 회전 프레임 애니메이션 (이미지 없으면 💰 폴백)
+  const coinImg = getImg(COIN_URLS[Math.floor(Date.now() / 80) % COIN_URLS.length]);
+  ctx.font = "30px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (const b of state.buildings) {
+    if (!houseIconVisible(b)) continue;
+    const p = houseIconPos(b);
+    const bob = Math.sin(Date.now() / 300) * 3;
+    if (imgOK(coinImg)) {
+      const cw = 38;
+      ctx.drawImage(coinImg, p.x - cw / 2, p.y - cw / 2 + bob, cw, cw);
+    } else {
+      ctx.fillText("💰", p.x, p.y + bob);
+    }
+  }
+
+  if (moveMode) {
+    const ok = validPos(moveMode.type, moveMode.gx, moveMode.gy, moveMode.dir, moveMode.iid);
+    drawB(ctx, moveMode.type, moveMode.gx, moveMode.gy, moveMode.dir, 0.75, !ok);
+  }
+  // 발판·기준점·배치금지 칸 표시 — 편집 모드이거나 data.js debug.footprints
+  if (editMode || (GAME_DATA.debug && GAME_DATA.debug.footprints)) {
+    const gov = (ASSET_MAP.ground && ASSET_MAP.ground.overrides) || {};
+    ctx.fillStyle = "rgba(230,60,60,0.35)";
+    for (const k in gov) {
+      const v = gov[k];
+      if (!(typeof v === "object" && v.block)) continue;
+      const c = k.split(",");
+      footDiamond(ctx, +c[0], +c[1], 1, 1);
+      ctx.fill();
+    }
+    for (const ft of FEATURES) {
+      if (!ft.block) continue;
+      footDiamond(ctx, ft.gx, ft.gy, 1, 1);
+      ctx.fill();
+    }
+    for (const k in state.tiles) {
+      if (state.tiles[k] !== "water") continue;
+      const c = k.split(",");
+      footDiamond(ctx, +c[0], +c[1], 1, 1);
+      ctx.fill();
+    }
+    for (const b of state.buildings) {
+      const f = footDims(b.type, b.dir);
+      ctx.strokeStyle = "#ffe14d"; ctx.lineWidth = 2 / cam.s;
+      footDiamond(ctx, b.gx, b.gy, f.w, f.h);
+      ctx.stroke();
+      ctx.fillStyle = "#ff5d5d";
+      ctx.beginPath();
+      ctx.arc(isoX(b.gx, b.gy), isoY(b.gx, b.gy), 4 / cam.s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+}

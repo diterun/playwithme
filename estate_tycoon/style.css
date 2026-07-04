@@ -150,6 +150,46 @@ html, body {
 .saveslot .meta .t1 { font-size: 13px; font-weight: 800; }
 .saveslot .meta .t2 { font-size: 11px; color: #9aa6bd; margin-top: 2px; }
 
+/* 편집 모드 지형 브러시 */
+#paint-bar {
+  position: fixed; left: 0; right: 0;
+  bottom: calc(66px + env(safe-area-inset-bottom));
+  display: flex; justify-content: center; gap: 8px; z-index: 24;
+}
+#paint-bar.hidden { display: none; }
+#paint-bar button {
+  border: 1px solid #2c3a56; border-radius: 12px; padding: 10px 12px;
+  background: rgba(27,36,64,0.92); color: #cdd6e6;
+  font-family: inherit; font-size: 13px; font-weight: 800; cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+#paint-bar button.active { background: #34507e; color: #fff; border-color: #5b8def; }
+
+/* 편집 모드 보관함 */
+#box-bar {
+  position: fixed; left: 0; right: 0;
+  bottom: calc(112px + env(safe-area-inset-bottom));
+  display: flex; align-items: center; justify-content: center;
+  gap: 8px; flex-wrap: wrap; padding: 0 10px; z-index: 24;
+}
+#box-bar.hidden { display: none; }
+#box-label {
+  font-size: 12px; font-weight: 800; color: #ffe9c0;
+  background: rgba(27,36,64,0.92); border: 1px solid #2c3a56;
+  border-radius: 10px; padding: 8px 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+#box-items { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+#box-items button {
+  border: 1px solid #b98a2e; border-radius: 10px; padding: 8px 10px;
+  background: rgba(126,90,30,0.92); color: #ffe9c0;
+  font-family: inherit; font-size: 12px; font-weight: 800; cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+#box-items:empty::after {
+  content: "비어 있음"; color: #7c8bb0; font-size: 12px; font-weight: 700;
+  background: rgba(27,36,64,0.7); border-radius: 8px; padding: 8px 10px;
+}
+
 /* 이동 모드 컨트롤 */
 #move-ctl {
   position: fixed; left: 0; right: 0;
@@ -182,6 +222,7 @@ html, body {
 #mv-se { grid-area: 3 / 3; }
 #mv-actions { display: flex; gap: 10px; }
 #mv-actions button { border-radius: 12px; padding: 12px 18px; font-size: 14px; }
+#mv-store { background: #7e5a1e; color: #ffe9c0; }
 #mv-ok { background: #3a6b3a; color: #eafbea; }
 #mv-ok:disabled { background: #2a3654; color: #5c6883; }
 #mv-cancel { background: #7e3434; color: #ffecec; }

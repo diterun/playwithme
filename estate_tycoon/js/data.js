@@ -1,11 +1,13 @@
-// estate_tycoon — 밸런스·배치 SSOT (여기 숫자만 고치면 게임 전체에 반영된다)
+// estate_tycoon — 밸런스·규칙 SSOT (★ 여기 숫자만 고치면 게임 전체 밸런스가 바뀐다)
 //
-// ★ 좌표 규칙:
-//   맵은 map.w × map.h 칸. gx는 0 ~ map.w-1, gy는 0 ~ map.h-1.
-//   건물 위치의 gx / gy 는 건물이 차지하는 구역의 "북쪽 꼭짓점(왼쪽 위)" 칸이다.
-//   예) w:4,h:4 건물이 gx:8,gy:4 면 → gx 8~11, gy 4~7 을 차지한다.
-//   dir 은 건물이 바라보는 방향 이미지: "SE" | "SW" | "NW" | "NE"
-//   (SE·NW = 원래 폭(w)×깊이(h), SW·NE = 90도 회전이라 폭과 깊이가 서로 바뀐다)
+// 이 파일은 "게임의 규칙"만 담는다: 건물 성능, 레벨업 비용, 레시피(생산품·시간·양),
+//   판매가, 개간 비용 곡선, 저장 설정.
+// "새 게임의 초기 상태"(맵 크기·시작 자원·시작 건물 배치·처음 열린 땅)는 start.js 에서 고친다.
+// 그림 교체(건물 PNG·타일)는 assets.js 에서 한다.
+//
+// ★ 건물 추가하는 법: 아래 buildings 에 새 키를 하나 더 넣으면 된다(생산건물이면 recipes,
+//   집이면 house, 시장류면 queueUnlock/priceBonus). start.js 시작 배치나 extraBuilds 건설
+//   허가에서 그 키를 쓰면 게임에 나온다. 엔진 코드는 안 건드려도 된다.
 //
 // ★ 이미지 보정값 (건물 그림이 발판 칸과 안 맞을 때 만지는 4개):
 //   imgScale : 그림 크기 배율. 1.0 = 발판 폭에 딱 맞춤
@@ -14,11 +16,8 @@
 //   imgDY    : 그림을 위아래로 밀기(픽셀). +는 아래, -는 위
 //   → 맞추는 요령: 맨 아래 debug.footprints 를 true 로 켜면 노란 테두리(발판)와
 //     빨간 점(기준 꼭짓점 gx,gy)이 맵에 보인다. 그걸 보면서 숫자를 맞춰라.
-//
-// ★ 방향(회전)마다 어긋남이 다를 때: 네 값 모두 숫자 대신 방향별 객체로 쓸 수 있다.
-//   예) imgDX: { SE: 0, SW: -6, NW: 0, NE: 6 },  imgDY: { SE: 0, SW: 4, NW: 0, NE: 0 }
-//   객체에서 빠진 방향은 조정 전 기본값(imgScale 1.5 / imgFoot 0.9 / imgDX·imgDY 0)으로
-//   돌아가니, 방향별 객체로 갈 거면 네 방향을 전부 적어주는 게 안전하다.
+//   방향(회전)마다 어긋남이 다르면 네 값 모두 숫자 대신 방향별 객체로 쓸 수 있다.
+//   예) imgDX: { SE: 0, SW: -6, NW: 0, NE: 6 }  (빠진 방향은 0으로 취급)
 //
 // ★ 레벨업 비용 공식 (2단 곡선 — 10렙까지 쉽고 그 뒤 가파르게):
 //   cost.base = 2레벨로 올리는 비용.
@@ -30,17 +29,12 @@
 // ★ 대기열(큐) 방식: 생산·판매는 칸이 나란히 도는 게 아니라 "줄을 선다".
 //   맨 앞 하나만 진행되고, 끝나면 다음 것이 자동으로 시작된다.
 //   queueUnlock = 대기열 칸이 열리는 건물 레벨 목록. 예) [1, 5, 15] = 1렙 1칸, 5렙 2칸, 15렙 3칸.
-//
-// ★ 타일 그림·건물 그림 교체는 assets.js 에서 한다 (여기는 크기·위치만).
 "use strict";
 
 const GAME_DATA = {
-  version: 2,  // 저장 형식 버전 (구조가 바뀌면 올린다 — 옛 저장과 호환 안 됨)
+  version: 3,  // 저장 형식 버전 (구조가 바뀌면 올린다 — 옛 저장과 호환 안 됨)
 
-  map: { w: 20, h: 40 },
-
-  start: { gold: 300, wood: 0, stone: 0, plank: 0, furniture: 0, copper: 0, silver: 0, goldore: 0 },
-
+  // ── 자원 정의 (표시용 이름·아이콘) ───────────────────────
   resources: {
     gold:      { name: "골드",   icon: "🪙" },
     wood:      { name: "나무",   icon: "🪵" },
@@ -52,6 +46,22 @@ const GAME_DATA = {
     goldore:   { name: "금광석", icon: "🥇" },
   },
 
+  // ── 영지 개간 규칙 (땅 확장 비용·숲 그림) ─────────────────
+  // 맵은 chunkSize×chunkSize(4×4) 청크로 나뉜다. 개방 안 된 청크는 빽빽한 숲이라 건물을 못 짓는다.
+  // 내 땅과 붙어 있는 숲 청크를 맵에서 탭하면 골드를 내고 개간한다.
+  // n번째 개간 비용 = cost.base × cost.growth^(n-1) 골드. (처음 열린 땅은 start.js openChunks)
+  land: {
+    chunkSize: 4,
+    cost: { base: 400, growth: 1.35 },
+    // 숲 그림: 잠긴 청크 하나에 2×2짜리 나무 뭉치 4개가 깔린다. 방향(_SE 등)은 자동으로 섞인다.
+    treeImg: "../assets/deco/trees_A_large",
+    treeScale: 1.4,   // 나무 그림 폭 배율 (1.0 = 2×2 발판 폭에 딱)
+    treeFoot: 0.9,    // 그림 바닥 기준점 (건물 imgFoot과 동일한 의미)
+  },
+
+  // ── 건물 정의 ────────────────────────────────────────────
+  // w×h = 발판 칸 크기, maxLevel = 레벨 상한(영주성 제외 전부 영주성 레벨에도 묶임),
+  // cost = 레벨업 비용 곡선, recipes = 생산 레시피, house = 집 경제, queueUnlock = 대기열 칸.
   buildings: {
     castle: {
       name: "영주성", icon: "🏰",
@@ -80,7 +90,7 @@ const GAME_DATA = {
       desc: "나무를 생산한다. 높은 레벨에서 판자·가구 가공이 열린다.",
       queueUnlock: [1, 5, 15],  // 생산칸: 1렙 1칸, 5렙 2칸, 15렙 3칸
       outBonus: 0.25,           // 레벨당 생산량 +25%
-      // unlock = 이 레시피가 열리는 건물 레벨. in = 투입 자원(명령 시 바로 차감).
+      // unlock = 이 레시피가 열리는 건물 레벨. in = 투입 자원(명령 시 바로 차감). time = 초.
       recipes: [
         { name: "통나무 손질", time: 10,   out: { wood: 1 },      unlock: 1 },
         { name: "목재 다발",   time: 300,  out: { wood: 40 },     unlock: 1 },  // 5분
@@ -131,18 +141,9 @@ const GAME_DATA = {
     },
   },
 
-  // ── 게임 시작 시 배치돼 있는 건물들 ──────────────────────
-  startBuildings: [
-    { type: "castle",      gx: 8,  gy: 4,  dir: "SE" },
-    { type: "market",      gx: 4,  gy: 14, dir: "SE" },
-    { type: "lumbermill",  gx: 13, gy: 14, dir: "SW" },
-    { type: "mine",        gx: 13, gy: 24, dir: "SW" },
-    { type: "house_small", gx: 4,  gy: 20, dir: "SE" },
-    { type: "house_small", gx: 7,  gy: 20, dir: "SE" },
-  ],
-
   // ── 추가 건설 허가 (건설 탭) ─────────────────────────────
   // castle = 영주성이 이 레벨이 되면 목록에 열린다. 같은 종류는 위에서부터 순서대로 지어진다.
+  // (시작부터 놓여 있는 건물은 여기가 아니라 start.js buildings 에서 정한다)
   extraBuilds: [
     { type: "house_small", castle: 2,  cost: { gold: 400 } },
     { type: "lumbermill",  castle: 5,  cost: { gold: 1500,  wood: 200 } },
@@ -154,14 +155,33 @@ const GAME_DATA = {
     { type: "mine",        castle: 20, cost: { gold: 40000, plank: 100 } },
   ],
 
-  // 시장 판매 공식: 받는 골드 = 개수 × 단가 × (1 + priceBonus×(시장레벨-1))
-  //                판매 시간(초) = sellBase + 받는 골드 × sellPerGold
+  // ── 시장 판매 공식 ───────────────────────────────────────
+  // 받는 골드 = 개수 × prices[자원] × (1 + 시장.priceBonus×(시장레벨-1))
+  // 판매 시간(초) = sellBase + 받는 골드 × sellPerGold  (많이·비싸게 팔수록 오래)
   market: {
     prices: { wood: 2, stone: 3, plank: 12, furniture: 150, copper: 10, silver: 30, goldore: 80 },
     sellBase: 2,
     sellPerGold: 0.2,
   },
 
+  // ── 맵을 돌아다니는 NPC (앰비언트 — 저장 안 됨, 접속할 때마다 새로 생성) ──
+  // 건물이 아니라 그냥 빈 땅을 서성이는 캐릭터다. 가만히 서 있다가 이웃 칸으로 조금씩 옮겨다닌다.
+  // base   = 프레임 PNG 폴더 (스프라이트시트를 잘라 넣은 곳).
+  // idle/walk = 그 폴더 안 파일명(확장자 빼고). 순서대로 애니메이션으로 재생된다.
+  // count  = 몇 명 돌아다니나. speed = 걷기 속도(초당 타일). fps = 애니 속도. scale = 그림 크기(타일 폭 배율).
+  // idleMin/idleMax = 한 칸 이동 후 멈춰 쉬는 시간(초) 범위.
+  // ★ 다른 캐릭터 추가: 스프라이트시트를 32px 칸으로 잘라 assets/mini_humans/<직업>/ 에 넣고 여기 항목 추가.
+  npcs: {
+    king: {
+      base: "../assets/mini_humans/king",
+      idle: ["r0c0", "r0c1", "r0c2", "r0c3"],
+      walk: ["r1c0", "r1c1", "r1c2", "r1c3", "r1c4"],
+      count: 1, speed: 1.3, fps: 6, scale: 1.4,
+      idleMin: 1.5, idleMax: 5.0,
+    },
+  },
+
+  // ── 저장 설정 ────────────────────────────────────────────
   save: {
     key: "estate_tycoon_v1",  // localStorage 키 접두어 (바꾸면 옛 저장을 못 읽는다)
     autosaveSec: 60,          // 자동저장 주기(초)
