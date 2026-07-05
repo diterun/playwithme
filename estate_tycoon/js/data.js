@@ -20,6 +20,14 @@
 //   방향(회전)마다 어긋남이 다르면 네 값 모두 숫자 대신 방향별 객체로 쓸 수 있다.
 //   예) imgDX: { SE: 0, SW: -6, NW: 0, NE: 6 }  (빠진 방향은 0으로 취급)
 //
+// ★ 터치(탭) 면적 보정값 — ⚠️ 그림 크기와 무관하게 "잡히는 영역"만 바꾼다 (위 imgScale 은 그림 자체가 커/작아짐):
+//   hitScale  : 그림 박스 대비 터치 박스 비율. 1.0 = 그림 그대로(기본), 0.6 = 60%로 축소. (가로·세로 동시)
+//               ★ 축소는 "바닥(건물이 앉은 쪽)" 기준 — 줄이면 위(지붕/빈 공간)가 잘리고 아래 몸통만 남는다.
+//   hitScaleX / hitScaleY : 가로·세로를 따로 줄일 때 (없으면 hitScale 사용)
+//   hitDX / hitDY : 터치 박스를 픽셀 단위로 옮기기(+오른쪽/+아래). 건물 몸통 쪽으로 맞출 때.
+//   → 편집 모드에서 회색 점선=그림 박스, 청록 박스=터치 박스. 발판(바닥 칸) 탭은 이 값과 무관하게 항상 잡힌다.
+//   네 값 모두 방향별 객체로도 쓸 수 있다. 예) hitScale: { SE: 0.6, NW: 0.7 }
+//
 // ★ 레벨업 비용 공식 (지수 곡선 — 렙이 오를수록 다음 렙이 급격히 비싸진다):
 //   cost.base = 2레벨로 올리는 비용. 이후 레벨마다 ×growth 로 곱해진다 → 비용 = base × growth^(렙-2).
 //   즉 매 레벨 growth배씩 커지는 지수함수. 1→50렙까지 매끈하게 가팔라진다. (예: growth 1.2 면 50렙 ≈ base의 6300배)
@@ -46,6 +54,19 @@ const GAME_DATA = {
     small:  { name: "소량", outMul: 1,  timeMul: 1  },
     medium: { name: "중량", outMul: 5,  timeMul: 10 },
     large:  { name: "대량", outMul: 20, timeMul: 60 },
+  },
+
+  // ── 건축(신축·레벨업 공통) ────────────────────────────────
+  // 신축·레벨업 모두 "건축"이며 시간이 든다. 노움이 그 자리에 붙어 점프한다.
+  // 건축 시간(초) = 건물의 buildBase × growth^(목표레벨-1). 목표레벨=신축이면 1, 레벨업이면 올릴 레벨.
+  //   → 레벨이 높을수록 다음 레벨 건축이 점점 오래 걸린다(지수). growth 는 건물별 buildGrowth 로 덮을 수 있다.
+  // baseSlots = 동시에 진행 가능한 건축 수. slotAt = 영주성이 이 레벨이 되면 슬롯 +1 (여기선 10/20/30 → 최대 5).
+  // (건물별 buildBase 는 각 건물 정의 안에 있다: 제련소·광산·농장·작은집이 빠르고, 큰집→대장간→방앗간→교회 순으로 느리다)
+  construction: {
+    baseSlots: 2,
+    slotAt: [10, 20, 30],
+    growth: 1.13,       // 건물별 buildGrowth 없으면 이 값 사용
+    baseDefault: 60,    // 건물에 buildBase 없을 때 기본
   },
 
   // ── 자원 정의 (표시용 이름·아이콘) ───────────────────────
@@ -107,7 +128,9 @@ const GAME_DATA = {
       name: "영주성", icon: "🏰",
       w: 4, h: 4, maxLevel: 50,
       img: "castle", imgScale: 1.3, imgFoot: 1, imgDX: 0, imgDY: 0,
+      hitScaleX: 0.45, hitScaleY: 0.82, hitDX: 0, hitDY: -10,   // 터치 박스(그림 크기와 별개). 편집 모드 청록 박스 보며 조정
       desc: "영지의 심장. 다른 모든 건물의 레벨 상한이 영주성 레벨이다. 최대 50렙.",
+      buildBase: 60,   // 건축 기본 시간(초). 영주성은 규모가 커 느린 편.
       cost: { base: { gold: 500, wood: 40, stone: 40 }, growth: 1.22 },  // 단일 지수곡선 (50렙 ≈ ×14000)
     },
 
@@ -116,7 +139,9 @@ const GAME_DATA = {
       w: 4, h: 3, maxLevel: 50,
       img: "market", imgScale: 1.05, imgFoot: 1,
       imgDX: { SE: 5, SW: 0, NW: 0, NE: 0 }, imgDY: { SE: 25, SW: 27, NW: 25, NE: 25 },
+      hitScaleX: 0.78, hitScaleY: 0.58, hitDX: -4, hitDY: -37,
       desc: "자원을 사고판다(대기열 2칸 고정). 레벨이 오르면 스프레드가 좋아진다.",
+      buildBase: 45,
       queueUnlock: [1, 1],   // 항상 2칸 (레벨 올려도 안 늘어남)
       cost: { base: { gold: 300, wood: 30 }, growth: 1.20 },
     },
@@ -126,7 +151,9 @@ const GAME_DATA = {
       w: 3, h: 3, maxLevel: 50,
       img: "lumbermill", imgScale: 1.2, imgFoot: 1,
       imgDX: { SE: 0, SW: 10, NW: 0, NE: 0 }, imgDY: { SE: 10, SW: 10, NW: 3, NE: 8 },
+      hitScaleX: 0.57, hitScaleY: 0.76, hitDX: { SE: 10, SW: -10, NW: -10, NE: 10 }, hitDY: -20,
       desc: "나무를 켠다. 레벨이 오르면 판자·가구, 그리고 활 계열 가공이 열린다.",
+      buildBase: 30,   // 빠른 편
       queueUnlock: [1, 1, 10, 20, 35],  // 1렙 2칸 → 10렙 3 → 20렙 4 → 35렙 5
       outBonus: 0.25,
       recipes: [
@@ -145,7 +172,9 @@ const GAME_DATA = {
       w: 3, h: 3, maxLevel: 50,
       img: "mine", imgScale: 1.05, imgFoot: 1,
       imgDX: { SE: 7, SW: -5, NW: 7, NE: -5 }, imgDY: { SE: 15, SW: 15, NW: 17, NE: 20 },
+      hitScaleX: 0.63, hitScaleY: 0.61, hitDX: 0, hitDY: -28,
       desc: "광물을 캔다. 레벨이 오르면 석탄·동·은·금광석이 차례로 열린다.",
+      buildBase: 30,   // 빠른 편
       queueUnlock: [1, 1, 10, 20, 35],
       outBonus: 0.25,
       recipes: [
@@ -163,7 +192,9 @@ const GAME_DATA = {
       name: "대장간", icon: "⚒️",
       w: 3, h: 3, maxLevel: 50,
       img: "blacksmith", imgScale: 1.2, imgFoot: 1, imgDX: 0, imgDY: 8,
+      hitScale: 0.64, hitDX: { SE: 0, SW: 0, NW: 0, NE: 0 }, hitDY: -25,
       desc: "광석을 녹여 괴·도구로 만든다. 판자·석재로 가구류도 짠다.",
+      buildBase: 90,   // 느린 편
       queueUnlock: [1, 1, 10, 20, 35],
       outBonus: 0.25,
       recipes: [
@@ -181,7 +212,9 @@ const GAME_DATA = {
       name: "농장", icon: "🌾",
       w: 3, h: 3, maxLevel: 50,
       img: "watermill", imgScale: 1.2, imgFoot: 1, imgDX: 0, imgDY: 8,
+      hitScaleX: 0.63, hitScaleY: 0.77, hitDX: 0, hitDY: -15,
       desc: "밀·감자를 기르고 가축을 친다. 밀·효모·감자는 소·중·대량으로.",
+      buildBase: 30,   // 빠른 편
       queueUnlock: [1, 1, 10, 20, 35],
       outBonus: 0.25,
       recipes: [
@@ -198,7 +231,9 @@ const GAME_DATA = {
       name: "방앗간", icon: "🌬️",
       w: 3, h: 3, maxLevel: 50,
       img: "windmill", imgScale: 1.2, imgFoot: 1, imgDX: 0, imgDY: 8,
+      hitScaleX: 0.58, hitScaleY: 0.71, hitDX: 0, hitDY: -15,
       desc: "밀을 빻고 가축을 가공한다. 밀가루·빵·소시지·우유.",
+      buildBase: 120,   // 더 느림
       queueUnlock: [1, 1, 10, 20, 35],
       outBonus: 0.25,
       recipes: [
@@ -214,7 +249,9 @@ const GAME_DATA = {
       name: "교회", icon: "⛪",
       w: 3, h: 3, maxLevel: 50,
       img: "church", imgScale: 1.25, imgFoot: 1, imgDX: 0, imgDY: 6,
+      hitScaleX: 0.61, hitScaleY: 0.67, hitDX: 0, hitDY: -10,
       desc: "술·치즈를 빚고, 예술과 사치품을 만든다.",
+      buildBase: 180,   // 가장 느림
       queueUnlock: [1, 1, 10, 20, 35],
       outBonus: 0.25,
       recipes: [
@@ -231,7 +268,9 @@ const GAME_DATA = {
       name: "작은 집", icon: "🏠",
       w: 2, h: 2, maxLevel: 20,
       img: "home_A", imgScale: 1.3, imgFoot: 0.95, imgDX: 0, imgDY: 0,
+      hitScaleX: 0.7, hitScaleY: 0.72, hitDX: 0, hitDY: -13,
       desc: "주민이 세금을 낸다. 쌓인 골드는 💰 표시를 눌러 수거.",
+      buildBase: 20,   // 가장 빠름
       // rate = 초당 골드. rateBonus = 레벨당 배수(+). capPerLevel = 저장 상한(×레벨). showAt = 💰 뜨는 액수.
       // demand = 주민 소비: 이 레벨 이상이면 item 을 초당 rate 만큼 먹고, 배부른 만큼 세금이 ×(1+boost).
       //   재고가 없으면 그냥 기본 세금(마이너스는 없음). from 이 높은 것이 우선(고레벨일수록 고급품 소비).
@@ -249,7 +288,9 @@ const GAME_DATA = {
       name: "큰 집", icon: "🏡",
       w: 3, h: 3, maxLevel: 20,
       img: "home_B", imgScale: 1.2, imgFoot: 0.95, imgDX: 0, imgDY: 0,
+      hitScaleX: 0.60, hitScaleY: 0.75, hitDX: 0, hitDY: -15,
       desc: "부유한 주민이 산다. 세금이 훨씬 많다.",
+      buildBase: 60,   // 작은집보다 느림
       house: {
         rate: 1.2, rateBonus: 0.5, capPerLevel: 2000, showAt: 400,
         demand: [

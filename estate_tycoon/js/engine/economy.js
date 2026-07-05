@@ -45,19 +45,86 @@ function scaledIn(rec, tierKey) {
 // 단계별 소요 시간 (초)
 function scaledTime(rec, tierKey) { return Math.max(1, Math.round(rec.time * tierDef(tierKey).timeMul)); }
 
+/* ── 건축(신축·레벨업 공통) ── */
+// 건축 시간(초): 건물 buildBase × growth^(목표레벨-1). 레벨이 높을수록 지수로 길어진다.
+function buildTimeFor(type, toLevel) {
+  const c = GAME_DATA.construction || {};
+  const d = bdef(type) || {};
+  const base = d.buildBase != null ? d.buildBase : (c.baseDefault || 60);
+  const growth = d.buildGrowth != null ? d.buildGrowth : (c.growth || 1.13);
+  return Math.max(1, Math.round(base * Math.pow(growth, Math.max(0, (toLevel || 1) - 1))));
+}
+// 동시 건축 슬롯 수 = baseSlots + (영주성이 slotAt 임계값을 넘긴 개수)
+function constructionSlots() {
+  const c = GAME_DATA.construction || { baseSlots: 2, slotAt: [] };
+  let n = c.baseSlots || 2;
+  const cl = castleLevel();
+  for (const lv of (c.slotAt || [])) if (cl >= lv) n++;
+  return n;
+}
+function ensureConstruction() { if (!Array.isArray(state.construction)) state.construction = []; }
+function activeConstructionCount() { ensureConstruction(); return state.construction.filter(j => j.end != null).length; }
+function constructionJobFor(iid) { ensureConstruction(); return state.construction.find(j => j.iid === iid) || null; }
+// 건축 작업을 줄에 올린다(비용은 호출부에서 이미 지불). 빈 슬롯이 있으면 processConstruction 이 곧 시작시킨다.
+function enqueueConstruction(iid, kind, toLevel) {
+  ensureConstruction();
+  const b = byIid(iid);
+  if (!b) return;
+  state.construction.push({ iid, kind, toLevel, dur: buildTimeFor(b.type, toLevel), end: null });
+}
+
 function tryUpgrade(iid) {
   const b = byIid(iid);
   if (!b) return;
   const d = bdef(b.type);
+  if (b.constructing) return toast("아직 짓는 중이다");
+  if (constructionJobFor(iid)) return toast("이미 건축 중이다");
   const next = b.level + 1;
   if (next > d.maxLevel) return toast("이미 최고 레벨");
   if (b.type !== "castle" && next > castleLevel()) return toast(`영주성 Lv.${next} 필요`);
   const cost = costFor(b.type, next);
   if (!canAfford(cost)) return toast("자원 부족");
   pay(cost);
-  b.level = next;
-  toast(`${d.name} Lv.${next} 달성!`);
+  enqueueConstruction(iid, "upgrade", next);
+  processConstruction(Date.now());  // 빈 슬롯이 있으면 즉시 착공
+  const started = constructionJobFor(iid) && constructionJobFor(iid).end != null;
+  toast(started ? `${d.name} 건축 시작 (Lv.${next})` : `${d.name} 건축 대기열에 추가 (건축반 가득 참)`);
   refreshPanel(); updateHud();
+}
+
+// 진행 중 건축 처리: 완료된 것 반영 → 빈 슬롯에 대기 작업 착공(오프라인 연쇄도 시각 순서대로 정확히)
+function processConstruction(now) {
+  ensureConstruction();
+  let changed = false;
+  // 사라진 건물(보관·삭제)의 작업은 버린다
+  for (let i = state.construction.length - 1; i >= 0; i--) {
+    if (!byIid(state.construction[i].iid)) { state.construction.splice(i, 1); changed = true; }
+  }
+  // 빈 슬롯에 대기 작업 착공 (착공 시각 t 기준)
+  const startWaiting = (t) => {
+    const slots = constructionSlots();
+    for (const j of state.construction) {
+      if (state.construction.filter(x => x.end != null).length >= slots) break;
+      if (j.end == null) { j.end = t + j.dur * 1000; changed = true; }
+    }
+  };
+  startWaiting(now);
+  // 완료를 시각 순으로 처리하고, 그때마다 빈 슬롯을 다시 채운다(오프라인 따라잡기)
+  for (let guard = 0; guard < 10000; guard++) {
+    let next = null;
+    for (const j of state.construction) if (j.end != null && j.end <= now && (!next || j.end < next.end)) next = j;
+    if (!next) break;
+    const b = byIid(next.iid);
+    const t = next.end;
+    if (b) {
+      if (next.kind === "build") { b.level = 1; b.constructing = false; toast(`🏗️ ${bdef(b.type).name} 건설 완료!`); }
+      else { b.level = Math.min(bdef(b.type).maxLevel, next.toLevel); toast(`🏗️ ${bdef(b.type).name} Lv.${b.level} 건축 완료!`); }
+    }
+    state.construction.splice(state.construction.indexOf(next), 1);
+    changed = true;
+    startWaiting(t);
+  }
+  if (changed) { updateHud(); refreshPanel(); }
 }
 
 // 생산량 = 레시피 기본 × 단계배율(outMul) × (1 + outBonus×(레벨-1))
@@ -308,7 +375,7 @@ function collectHouses() {
 function processQueues(now) {
   let changed = false;
   for (const b of state.buildings) {
-    if (!b.queue.length) continue;
+    if (b.constructing || !b.queue.length) continue;
     if (b.queue[0].end == null) b.queue[0].end = now + b.queue[0].dur * 1000;
     while (b.queue.length && now >= b.queue[0].end) {
       const job = b.queue.shift();
@@ -341,7 +408,7 @@ function economyTick(now) {
   lastEcoTs = now;
   let stockDirty = false;
   for (const b of state.buildings) {
-    if (!isHouse(b.type)) continue;
+    if (b.constructing || !isHouse(b.type)) continue;
     // 주민 소비: 요구품이 있으면 재고에서 먹고, 배부른 비율만큼 세금이 늘어난다.
     let mult = 1;
     const dem = houseDemand(b);
@@ -364,6 +431,7 @@ function economyTick(now) {
   }
   if (stockDirty) { updateHud(); refreshPanel(); }
   if (stepMarket(now)) refreshPanel();  // 가격이 갱신되면 시장 패널 다시 그림
+  processConstruction(now);
   processQueues(now);
 }
 

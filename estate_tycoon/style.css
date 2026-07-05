@@ -281,6 +281,76 @@ html, body {
 #mv-ok:disabled { background: #2a3654; color: #5c6883; }
 #mv-cancel { background: #7e3434; color: #ffecec; }
 
+/* ── 튜토리얼 (대화형) ── */
+#tut { position: fixed; inset: 0; z-index: 60; }
+#tut.hidden { display: none; }
+/* scene: 지도 위 반투명 덮개 + 좌/우 초상 + 아래 대사창 (탭 막음) */
+#tut.scene { background: rgba(6,10,20,0.72); }
+/* coach: 덮개 없이 위쪽 대사창만 — 탭은 아래(시장)로 통과 */
+#tut.coach { background: transparent; pointer-events: none; }
+#tut.coach #tut-box { pointer-events: auto; }
+#tut.coach #tut-scene { display: none; }
+
+#tut-scene { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.tut-por {
+  position: absolute; bottom: 0; height: 46vh; max-height: 460px; width: auto;
+  filter: drop-shadow(0 6px 14px rgba(0,0,0,0.55));
+  transition: opacity 0.2s, transform 0.2s, filter 0.2s;
+}
+.tut-por.left  { left: -3vw; }
+.tut-por.right { right: -3vw; }
+.tut-por.dim   { opacity: 0.5; filter: brightness(0.55) drop-shadow(0 6px 14px rgba(0,0,0,0.55)); transform: translateY(8px); }
+/* 노움(요정)은 인간보다 훨씬 작게 — 바닥선은 그대로라 작은 요정이 사람 옆에 선 느낌 */
+.tut-por.small { height: 19vh; max-height: 190px; }
+.tut-por.small.left  { left: 2vw; }
+.tut-por.small.right { right: 2vw; }
+.tut-por.small.dim   { transform: translateY(4px); }
+
+#tut-box {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  width: min(92vw, 640px);
+  background: rgba(16,22,40,0.97); border: 2px solid #3a4a70; border-radius: 16px;
+  padding: 14px 16px; box-shadow: 0 10px 34px rgba(0,0,0,0.55);
+}
+#tut.scene #tut-box { bottom: calc(22px + env(safe-area-inset-bottom)); }
+#tut.coach #tut-box { top: calc(56px + env(safe-area-inset-top)); }
+#tut-ava {
+  display: none; float: right; width: 58px; height: 58px; border-radius: 10px;
+  margin: 0 0 6px 12px; object-fit: cover; object-position: top center;
+  border: 1px solid #3a4a70; background: #0f1830;
+}
+#tut.coach #tut-ava { display: block; }
+#tut-name {
+  display: inline-block; font-size: 14px; font-weight: 800; color: #ffd479;
+  background: #26324a; border-radius: 8px; padding: 3px 10px; margin-bottom: 8px;
+}
+#tut-text { font-size: 15px; line-height: 1.55; color: #eef2f7; min-height: 2.8em; }
+#tut-ctl { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
+#tut-skip {
+  border: 1px solid #3a4a70; background: none; color: #9aa6bd;
+  border-radius: 8px; padding: 8px 12px; font-family: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+#tut-next {
+  border: none; background: #3a6b3a; color: #eafbea;
+  border-radius: 9px; padding: 9px 18px; font-family: inherit; font-size: 14px; font-weight: 800; cursor: pointer;
+}
+
+#tut-hint {
+  position: fixed; top: calc(56px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+  z-index: 55; display: flex; align-items: center; gap: 10px;
+  background: rgba(16,22,40,0.96); border: 2px solid #b98a2e; border-radius: 12px;
+  padding: 10px 14px; box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+  animation: tuthintpulse 1.4s ease-in-out infinite;
+}
+#tut-hint.hidden { display: none; }
+#tut-hint span { font-size: 14px; font-weight: 800; color: #ffe9c0; }
+#tut-hint button {
+  border: 1px solid #3a4a70; background: none; color: #9aa6bd;
+  border-radius: 8px; padding: 6px 10px; font-family: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+@keyframes tuthintpulse { 0%,100% { transform: translateX(-50%) translateY(0); } 50% { transform: translateX(-50%) translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { #tut-hint { animation: none; } }
+
 /* 토스트 */
 #toast {
   position: fixed; left: 50%; transform: translateX(-50%);

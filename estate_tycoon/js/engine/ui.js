@@ -31,16 +31,15 @@ function toast(msg) {
 function updateHud() {
   const chips = document.getElementById("res-chips");
   if (chips) {
-    // 골드·나무·석재는 항상, 나머지는 1개 이상 보유 시에만 표시
-    const always = ["gold", "wood", "stone"];
-    chips.innerHTML = Object.entries(GAME_DATA.resources)
-      .filter(([k]) => always.includes(k) || (state.res[k] || 0) >= 1)
-      .map(([k, r]) => `<div class="chip"><span class="ico">${r.icon}</span>${fmtNum(state.res[k] || 0)}</div>`).join("");
+    // 메인 화면 상단에는 골드만 (나머지 자원은 📦 자원 탭에서 1/2/3차로 확인)
+    const g = GAME_DATA.resources.gold;
+    chips.innerHTML = `<div class="chip"><span class="ico">${g.icon}</span>${fmtNum(state.res.gold || 0)}</div>`;
   }
 }
 
 /* ═══════════════ 패널 ═══════════════ */
 let panelKind = null, panelArg = null;
+let resTabIdx = 0;   // 📦 자원 탭의 현재 1/2/3차 서브탭
 const sellForm = { res: "wood", qty: 10, tab: 0, mode: "sell" };
 // 현재 모드에서 거래 가능한 최대 수량 (매도=보유량 / 매수=골드로 살 수 있는 만큼)
 function tradeMax() {
@@ -66,6 +65,7 @@ function openPanel(kind, arg) {
   document.querySelectorAll("#tabbar .tab").forEach(t => {
     t.classList.toggle("active", t.dataset.tab === tabOf(kind));
   });
+  if (typeof tutorialOnPanel === "function") tutorialOnPanel(kind, arg);
 }
 function closePanel() {
   panelKind = null; panelArg = null;
@@ -88,6 +88,24 @@ document.getElementById("option-btn").addEventListener("click", () => openPanel(
 /* ── 패널 조각들 ── */
 function upgradeCardHTML(b) {
   const d = bdef(b.type);
+  // 건축(신축·레벨업) 진행 중이면 진행바/대기 표시
+  const job = constructionJobFor(b.iid);
+  if (job || b.constructing) {
+    const now = Date.now();
+    const kindTxt = (job && job.kind === "upgrade")
+      ? `Lv.${b.level} → Lv.${job.toLevel} 건축`
+      : "건설";
+    if (job && job.end != null) {
+      const left = (job.end - now) / 1000;
+      const pct = Math.min(100, 100 * (1 - left / job.dur));
+      return `<div class="card"><div class="slot">
+        <div class="slothead"><span>🔨 ${kindTxt} 중</span><span class="tleft">${fmtDur(left)}</span></div>
+        <div class="prog"><div style="width:${Math.max(0, pct).toFixed(1)}%"></div></div></div></div>`;
+    }
+    return `<div class="card"><div class="slot">
+      <div class="slothead"><span>🔨 ${kindTxt} 대기</span><span class="tleft">건축반 기다림 (${fmtDur(job ? job.dur : buildTimeFor(b.type, 1))})</span></div>
+      <div class="note">동시 건축 ${constructionSlots()}칸이 다 찼다. 앞 건축이 끝나면 착공한다.</div></div></div>`;
+  }
   const next = b.level + 1;
   if (next > d.maxLevel) {
     return `<div class="card"><div class="row"><div class="info"><div class="name">레벨업</div>
@@ -96,11 +114,14 @@ function upgradeCardHTML(b) {
   const cost = costFor(b.type, next);
   const gated = b.type !== "castle" && next > castleLevel();
   const dis = gated || !canAfford(cost);
+  const time = buildTimeFor(b.type, next);
+  const free = activeConstructionCount() < constructionSlots();
   return `<div class="card"><div class="row">
     <div class="info"><div class="name">Lv.${b.level} → Lv.${next}</div>
       <div class="cost">${fmtCost(cost)}</div>
+      <div class="desc">🔨 건축 시간 ${fmtDur(time)}${free ? "" : " · 건축반 가득(대기열로)"}</div>
       ${gated ? `<div class="desc">영주성 Lv.${next} 필요</div>` : ""}</div>
-    <button class="btn" data-act="upgrade:${b.iid}" ${dis ? "disabled" : ""}>레벨업</button>
+    <button class="btn" data-act="upgrade:${b.iid}" ${dis ? "disabled" : ""}>${gated ? "레벨업" : "🔨 건축"}</button>
   </div></div>`;
 }
 // 이동·회전은 편집 모드에서만 — 패널에는 안내만 남긴다
@@ -263,7 +284,11 @@ function buildPanelHTML() {
     <div class="info"><div class="name">영지 확장 (개간)</div>
     <div class="desc">맵의 빽빽한 숲(4×4)을 탭하면 개간해서 건설 가능한 땅이 된다. 내 땅과 붙어 있는 숲만 가능.</div>
     <div class="cost">다음 개간 비용 ${fmtCost({ gold: landCost() })}</div></div></div></div>`;
-  html += `<div class="note" style="margin-bottom:8px">영주성 레벨이 오르면 새 건설 허가가 열린다.</div>`;
+  // 동시 건축(건축반) 현황
+  const slots = constructionSlots(), busy = activeConstructionCount();
+  const waiting = (state.construction || []).filter(j => j.end == null).length;
+  html += `<div class="note" style="margin-bottom:8px">🔨 건축반 ${busy}/${slots} 가동${waiting ? ` · 대기 ${waiting}` : ""} — 신축·레벨업 모두 시간이 든다(노움이 짓는다).
+    영주성 Lv.10·20·30에 건축반이 1칸씩 늘어난다. 영주성 레벨이 오르면 새 건설 허가도 열린다.</div>`;
   // 정렬: 작은집 → 큰집 → 생산시설. "이전 허가 먼저"(orderLock)인 항목은 숨긴다.
   const cat = t => (t === "house_small" ? 0 : t === "house_big" ? 1 : 2);
   const list = GAME_DATA.extraBuilds
@@ -276,7 +301,7 @@ function buildPanelHTML() {
     if (st === "built") { right = `<span class="tleft">✅ 건설됨</span>`; }
     else if (st === "ready") {
       right = `<button class="btn" data-act="build:${i}" ${canAfford(e.cost) ? "" : "disabled"}>짓기</button>`;
-      desc = `<div class="cost">${fmtCost(e.cost)}</div>`;
+      desc = `<div class="cost">${fmtCost(e.cost)}</div><div class="desc">🔨 건축 시간 ${fmtDur(buildTimeFor(e.type, 1))}</div>`;
     }
     else if (st === "levelLock") { right = `<span class="tleft">🔒 영주성 Lv.${e.castle}</span>`; }
     html += `<div class="card"><div class="row">
@@ -321,8 +346,16 @@ function renderPanel() {
 
   if (panelKind === "res") {
     title.textContent = "📦 자원";
-    html = `<div class="reslist">${Object.entries(GAME_DATA.resources).map(([k, r]) =>
-      `<div class="resrow"><span class="ico">${r.icon}</span><span class="nm">${r.name}</span><span class="amt">${fmtNum(state.res[k] || 0)}</span></div>`).join("")}</div>`;
+    // 1/2/3차 탭 (market.tabs 그대로 사용 — 골드는 여기 없어 자동 제외). 각 탭의 자원만 나열.
+    const tabs = GAME_DATA.market.tabs || [{ name: "전체", items: Object.keys(GAME_DATA.resources).filter(k => k !== "gold") }];
+    resTabIdx = Math.max(0, Math.min(resTabIdx, tabs.length - 1));
+    const items = tabs[resTabIdx].items;
+    html = `<div class="subtabs">${tabs.map((tb, ti) =>
+      `<button class="subtab ${resTabIdx === ti ? "on" : ""}" data-act="restab:${ti}">${tb.name}</button>`).join("")}</div>`;
+    html += `<div class="reslist">${items.map(k => {
+      const r = GAME_DATA.resources[k];
+      return `<div class="resrow"><span class="ico">${r.icon}</span><span class="nm">${r.name}</span><span class="amt">${fmtNum(state.res[k] || 0)}</span></div>`;
+    }).join("")}</div>`;
   } else if (panelKind === "build") {
     title.textContent = "🏗️ 건설";
     html = buildPanelHTML();
@@ -338,7 +371,11 @@ function renderPanel() {
     if (!b) { closePanel(); return; }
     const d = bdef(b.type);
     title.textContent = `${d.icon} ${d.name} Lv.${b.level}`;
-    if (b.type === "market") {
+    if (b.constructing) {
+      // 신축 공사판(0레벨) — 생산·세금 UI 대신 건축 현황만
+      title.textContent = `${d.icon} ${d.name} (건설 중)`;
+      html = `<div class="note">${d.desc}</div>` + upgradeCardHTML(b) + editHintHTML();
+    } else if (b.type === "market") {
       html = marketPanelHTML(now);
     } else {
       html = `<div class="note">${d.desc}</div>`;
@@ -360,6 +397,8 @@ function handleAct(act) {
   switch (p[0]) {
     case "upgrade": tryUpgrade(+p[1]); break;
     case "recipe": enqueueRecipe(+p[1], +p[2], p[3]); break;
+    case "restab": resTabIdx = +p[1]; refreshPanel(); break;
+    case "hitbox": setHitBox(!hitBoxEnabled()); break;
     case "selltab": {
       sellForm.tab = +p[1];
       const items = sellTabs()[sellForm.tab].items;
@@ -394,6 +433,7 @@ function handleAct(act) {
         groundDirty = true;  // 칠한 지형도 처음 땅으로 되돌아가게 바닥 다시 그림
         lastEcoTs = Date.now();
         setEditMode(false); closePanel(); updateHud();
+        if (typeof clearTut === "function") { clearTut(); tutorialBoot(); }  // 새 영지 → 튜토리얼도 처음부터
         toast("초기화 완료 — 새 영지 시작");
       }
       break;

@@ -76,6 +76,7 @@ function reconcileWorkers() {
     const cfg = defs[type];
     if (!cfg.building) continue;
     for (const b of byType(cfg.building)) {
+      if (b.constructing) continue;   // 공사 중엔 일꾼 대신 노움이 붙는다
       wanted.add(b.iid);
       if (!NPCS.some(n => n.boundIid === b.iid)) {
         const s = workSpot(b) || firstOpenAround(b);

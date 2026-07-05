@@ -143,7 +143,21 @@ function spriteRect(type, gx, gy, dir) {
     w: tw, h: th, cx, footY, f,
   };
 }
-function drawB(g, type, gx, gy, dir, alpha, invalid) {
+// 터치(탭) 판정용 사각형 — 그림 크기(spriteRect)와 별개로 조절한다.
+//   hitScale(=hitScaleX·hitScaleY 기본값) : 그림 박스 대비 터치 박스 비율(1=그림 그대로, 0.6=60%로 축소)
+//   hitDX / hitDY : 터치 박스를 픽셀 단위로 옮기기(건물 몸통 쪽으로). 방향별 객체도 가능(imgDX와 동일 규칙).
+// ★ 그림은 그대로 두고 "잡히는 면적"만 바뀐다. 발판(바닥 칸) 탭은 이 값과 무관하게 항상 잡힌다.
+function hitRect(type, gx, gy, dir) {
+  const d = bdef(type);
+  const r = spriteRect(type, gx, gy, dir);
+  const hs = dirVal(d.hitScale, dir, 1);
+  const w = r.w * dirVal(d.hitScaleX, dir, hs);
+  const h = r.h * dirVal(d.hitScaleY, dir, hs);
+  const cx = r.x + r.w / 2 + dirVal(d.hitDX, dir, 0);      // 가로 중앙
+  const bottom = r.y + r.h + dirVal(d.hitDY, dir, 0);      // 그림 박스 바닥 기준(건물이 바닥에 앉으므로)
+  return { x: cx - w / 2, y: bottom - h, w, h };            // hitScale 줄이면 아래쪽(몸통)만 남는다
+}
+function drawB(g, type, gx, gy, dir, alpha, invalid, imgUrl) {
   const d = bdef(type);
   const r = spriteRect(type, gx, gy, dir);
   g.globalAlpha = alpha;
@@ -160,7 +174,7 @@ function drawB(g, type, gx, gy, dir, alpha, invalid) {
     g.arc(isoX(gx, gy), isoY(gx, gy), 4 / cam.s, 0, Math.PI * 2);
     g.fill();
   }
-  const img = getImg(buildingImgURL(type, dir));
+  const img = getImg(imgUrl || buildingImgURL(type, dir));
   if (imgOK(img)) {
     g.drawImage(img, r.x, r.y, r.w, r.h);
   } else {
@@ -213,6 +227,16 @@ function houseIconVisible(b) {
   return isHouse(b.type) && b.accum >= bdef(b.type).house.showAt;
 }
 
+// 신축(공사판) 건물이 지금 보여줄 그림: 진행도에 따라 stage_A → stage_B → 완성 건물
+function constructStageURL(b) {
+  const job = (typeof constructionJobFor === "function") ? constructionJobFor(b.iid) : null;
+  let pct = 0;
+  if (job && job.end != null) pct = 1 - (job.end - Date.now()) / 1000 / job.dur;
+  if (pct < 1 / 3) return stageImgURL("stage_A", b.dir);   // 초반: 기초 공사
+  if (pct < 2 / 3) return stageImgURL("stage_B", b.dir);   // 중반: 골조
+  return buildingImgURL(b.type, b.dir);                    // 후반: 완성 건물 모습
+}
+
 function render() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = "#1a2438";
@@ -226,10 +250,26 @@ function render() {
   const items = [];
   for (const b of state.buildings) {
     const f = footDims(b.type, b.dir);
+    const alpha = (moveMode && moveMode.iid === b.iid) ? 0.25 : 1;
+    // 신축 공사 중이면 진행 단계 그림(stage_A→B→완성)으로 그린다
+    const imgUrl = b.constructing ? constructStageURL(b) : null;
     items.push({
       depth: b.gx + b.gy + f.w + f.h,
-      draw: () => drawB(ctx, b.type, b.gx, b.gy, b.dir, moveMode && moveMode.iid === b.iid ? 0.25 : 1),
+      draw: () => drawB(ctx, b.type, b.gx, b.gy, b.dir, alpha, undefined, imgUrl),
     });
+  }
+  // 건축 중(착공된) 건물마다 노움이 앞에서 점프
+  if (typeof drawGnome === "function" && Array.isArray(state.construction)) {
+    for (const j of state.construction) {
+      if (j.end == null) continue;                 // 착공된 것만(슬롯 대기 중엔 안 보임)
+      const b = byIid(j.iid);
+      if (!b) continue;
+      const f = footDims(b.type, b.dir);
+      const gx = b.gx + f.w / 2, gy = b.gy + f.h;   // 건물 앞 가운데
+      const gcx = isoX(gx, gy), gfy = isoY(gx, gy);
+      // 노움은 건물 "앞"에 서므로 자기 건물보다 항상 나중에(위에) 그린다 — stage_B·완성 그림에 안 가리게
+      items.push({ depth: b.gx + b.gy + f.w + f.h + 0.5, draw: () => drawGnome(ctx, gcx, gfy, 1.3, Date.now() / 1000 + j.iid) });
+    }
   }
   for (const ft of FEATURES) {
     items.push({ depth: ft.gx + ft.gy + 2, draw: () => drawFeature(ctx, ft) });
@@ -296,8 +336,26 @@ function render() {
       footDiamond(ctx, +c[0], +c[1], 1, 1);
       ctx.fill();
     }
+    // 터치영역(그림 박스·터치 박스)은 옵션이 켜졌을 때만 (기본은 안 보임)
+    const showHit = (typeof hitBoxEnabled === "function") ? hitBoxEnabled() : false;
     for (const b of state.buildings) {
       const f = footDims(b.type, b.dir);
+      if (showHit) {
+        // 그림 박스(회색 점선) = 이미지가 차지하는 영역(참고용). 터치 박스(청록) = 실제 탭 판정 영역.
+        //   그림은 그대로 두고 data.js hitScale/hitScaleX/hitScaleY/hitDX/hitDY 로 청록 박스만 조절.
+        //   (탭 우선순위: ① 발판 칸은 항상 → ② 이 청록 터치 박스)
+        const sr = spriteRect(b.type, b.gx, b.gy, b.dir);
+        ctx.strokeStyle = "rgba(180,190,200,0.5)"; ctx.lineWidth = 1 / cam.s;
+        ctx.setLineDash([3 / cam.s, 3 / cam.s]);
+        ctx.strokeRect(sr.x, sr.y, sr.w, sr.h);
+        ctx.setLineDash([]);
+        const r = hitRect(b.type, b.gx, b.gy, b.dir);
+        ctx.fillStyle = "rgba(70,200,220,0.15)";
+        ctx.fillRect(r.x, r.y, r.w, r.h);
+        ctx.strokeStyle = "#46c8dc"; ctx.lineWidth = 1.5 / cam.s;
+        ctx.strokeRect(r.x, r.y, r.w, r.h);
+      }
+      // 발판(노란 마름모) + 기준점(빨간 점)
       ctx.strokeStyle = "#ffe14d"; ctx.lineWidth = 2 / cam.s;
       footDiamond(ctx, b.gx, b.gy, f.w, f.h);
       ctx.stroke();

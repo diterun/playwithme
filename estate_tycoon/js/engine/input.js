@@ -147,7 +147,7 @@ function buildingAt(wx, wy) {
     return (b.gx + b.gy + fb.w + fb.h) - (a.gx + a.gy + fa.w + fa.h);
   });
   for (const b of order) {
-    const r = spriteRect(b.type, b.gx, b.gy, b.dir);
+    const r = hitRect(b.type, b.gx, b.gy, b.dir);   // 그림 박스가 아니라 "터치 박스"로 판정
     if (wx >= r.x && wx <= r.x + r.w && wy >= r.y && wy <= r.y + r.h) return b;
   }
   return null;

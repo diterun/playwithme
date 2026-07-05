@@ -31,20 +31,38 @@ function applySave(obj) {
   let maxIid = 0;
   const sanitize = (src) => {
     if (!bdef(src.type)) return null; // 모르는 건물은 버림 (버전업 대비)
+    const constructing = !!src.constructing;
     const b = {
       iid: src.iid || ++maxIid, type: src.type,
       gx: src.gx | 0, gy: src.gy | 0,
       dir: DIRS.includes(src.dir) ? src.dir : "SE",
-      level: Math.max(1, Math.min(src.level | 0 || 1, bdef(src.type).maxLevel)),
+      // 신축 공사 중이면 0레벨 유지, 아니면 최소 1레벨
+      level: constructing ? 0 : Math.max(1, Math.min(src.level | 0 || 1, bdef(src.type).maxLevel)),
       queue: Array.isArray(src.queue) ? src.queue : [],
       accum: +src.accum || 0,
     };
+    if (constructing) b.constructing = true;
     maxIid = Math.max(maxIid, b.iid);
     return b;
   };
   for (const src of d.buildings) { const b = sanitize(src); if (b) fresh.buildings.push(b); }
   for (const src of heldSrc) { const b = sanitize(src); if (b) fresh.held.push(b); }
   fresh.nextIid = Math.max(d.nextIid || 1, maxIid + 1);
+  // 진행 중 건축 복원 (건물이 남아 있는 작업만). end 는 절대시각이라 오프라인도 processConstruction 이 정확히 이어감
+  fresh.construction = [];
+  if (Array.isArray(d.construction)) {
+    for (const j of d.construction) {
+      if (!j || (j.kind !== "build" && j.kind !== "upgrade")) continue;
+      const iid = j.iid | 0;
+      if (!fresh.buildings.some(b => b.iid === iid)) continue;
+      fresh.construction.push({
+        iid, kind: j.kind,
+        toLevel: Math.max(1, j.toLevel | 0 || 1),
+        dur: Math.max(1, +j.dur || 1),
+        end: (j.end == null || !isFinite(+j.end)) ? null : +j.end,
+      });
+    }
+  }
   if (Array.isArray(d.land) && d.land.length) fresh.land = d.land.filter(k => typeof k === "string");
   if (d.tiles && typeof d.tiles === "object") fresh.tiles = d.tiles;
   // 동적 가격 상태 복원(있으면). 없으면 freshState의 기본(배수 전부 1)
@@ -127,6 +145,15 @@ function armBgmAutostart() {
   window.addEventListener("touchstart", start);
 }
 
+/* ── 편집 시 터치영역 보기 옵션 (기본 꺼짐) ── */
+const HITBOX_KEY = SKEY + "_hitbox";
+function hitBoxEnabled() { return lsGet(HITBOX_KEY) === "on"; }
+function setHitBox(on) {
+  lsSet(HITBOX_KEY, on ? "on" : "off");
+  refreshPanel();
+  toast(on ? "편집 시 터치영역 표시 켬" : "편집 시 터치영역 표시 끔");
+}
+
 function autoSave() {
   if (lsSet(SKEY + "_auto", serialize())) lastAutoTs = Date.now();
 }
@@ -153,6 +180,10 @@ function saveTabHTML() {
   let html = `<div class="card"><div class="name" style="margin-bottom:6px">🎵 배경음</div>
     <div class="note">잔잔한 배경 음악을 켜고 끈다.</div>
     <button class="btn ${bgmOn ? "" : "alt"} wide" data-act="bgm:toggle">${bgmOn ? "🔊 배경음 켜짐 — 누르면 끔" : "🔇 배경음 꺼짐 — 누르면 켬"}</button></div>`;
+  const hbOn = hitBoxEnabled();
+  html += `<div class="card"><div class="name" style="margin-bottom:6px">🎯 편집 시 터치영역 보기</div>
+    <div class="note">편집 모드에서 건물의 터치(탭) 영역을 청록 박스로 보여준다. 터치 영역을 손볼 때만 켜면 된다.</div>
+    <button class="btn ${hbOn ? "" : "alt"} wide" data-act="hitbox">${hbOn ? "🎯 터치영역 표시 켬 — 누르면 끔" : "⬜ 터치영역 표시 꺼짐 — 누르면 켬"}</button></div>`;
   html += `<div class="note" style="margin-bottom:8px">자동저장: ${GAME_DATA.save.autosaveSec}초마다${lastAutoTs ? ` · 마지막 ${new Date(lastAutoTs).toLocaleTimeString("ko-KR")}` : ""}</div>`;
   html += slotMetaHTML("⏱️ 자동저장", lsGet(SKEY + "_auto"), "auto", false);
   for (let n = 1; n <= GAME_DATA.save.slots; n++) {
@@ -222,6 +253,8 @@ async function exportStandalone() {
     // 게임이 쓰는 모든 그림을 base64로 수집
     const urls = new Set();
     for (const t of BTYPES) for (const dir of DIRS) urls.add(buildingImgURL(t, dir));
+    for (const dir of DIRS) { urls.add(stageImgURL("stage_A", dir)); urls.add(stageImgURL("stage_B", dir)); }  // 건축 단계 그림
+    if (typeof gnomeFrameList === "function") for (const u of gnomeFrameList()) urls.add(u);                    // 노움 프레임
     const gset = ASSET_MAP.ground || {};
     if (gset.grassDefault) urls.add(gset.grassDefault);
     if (gset.overrides) for (const k in gset.overrides) {
@@ -294,6 +327,7 @@ function frame() {
   if (groundDirty) { groundDirty = false; buildGround(); }
   economyTick(now);
   updateNpcs(now);
+  if (typeof tutorialTick === "function") tutorialTick();   // 영주성 Lv2 → 집 튜토리얼 등 조건 감지
   if (now - lastAutoTs > GAME_DATA.save.autosaveSec * 1000) autoSave();
   // 타이머·수량 표시 갱신 (패널 열려 있을 때 0.5초마다)
   if (panelKind && panelKind !== "option" && now - lastPanelRefresh > 500) {

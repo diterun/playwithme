@@ -6,7 +6,10 @@
 const TILE_W = 64, TILE_H = 32;
 const MAP_W = START.map.w, MAP_H = START.map.h;
 const DIRS = ["SE", "SW", "NW", "NE"];        // 회전 순서 (90도씩)
-const ASSET_BASE = "../assets/building/";     // 건물 PNG 기본 위치
+const ASSET_BASE = "../assets/building/blue/";     // 완성 건물 PNG 기본 위치(파란 지붕)
+const STAGE_BASE = "../assets/building/neutral/";  // 건축 단계 그림(공용): stage_A, stage_B
+// 건축 단계 그림 경로. stage = "stage_A" | "stage_B"
+function stageImgURL(stage, dir) { return STAGE_BASE + stage + "_" + dir + ".png"; }
 const BTYPES = Object.keys(GAME_DATA.buildings);
 
 const canvas = document.getElementById("game");
@@ -62,6 +65,8 @@ function freshState() {
     // 칠한 지형: "gx,gy" → "road" | "water". 시작 지형(START.tiles)을 복사해서 깐다.
     tiles: Object.assign({}, START.tiles || {}),
     held: [],   // 편집 모드 보관함에 담긴 건물들 (맵에서 잠시 치운 것)
+    // 진행 중인 건축(신축·레벨업). 각 항목 { iid, kind:"build"|"upgrade", toLevel, dur, end:완료시각ms|null(슬롯대기) }
+    construction: [],
     // 동적 가격 상태: 배수(mult)·이전 스텝 기록(hist)·시차 전파 예약(pending)·스텝수·시드(결정론)·마지막 스텝 시각
     market: { mult: {}, hist: {}, pending: [], step: 0, seed: (Date.now() >>> 0) || 1, ts: Date.now() },
     createdTs: Date.now(),
@@ -290,6 +295,7 @@ function npcFileList() {
 
 (function preload() {
   for (const t of BTYPES) for (const dir of DIRS) getImg(buildingImgURL(t, dir));
+  for (const dir of DIRS) { getImg(stageImgURL("stage_A", dir)); getImg(stageImgURL("stage_B", dir)); }
   for (const u of COIN_URLS) getImg(u);
   for (const dir of DIRS) getImg(GAME_DATA.land.treeImg + "_" + dir + ".png");
   getImg(paintTileURL("road")); getImg(paintTileURL("water"));

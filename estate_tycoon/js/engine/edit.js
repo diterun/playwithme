@@ -88,8 +88,13 @@ function confirmMove() {
   } else {
     if (!canAfford(moveMode.cost)) { toast("자원 부족"); exitMove(); return; }
     pay(moveMode.cost);
-    addBuilding(state, moveMode.type, moveMode.gx, moveMode.gy, moveMode.dir);
-    toast(`${bdef(moveMode.type).name} 건설 완료!`);
+    // 신축도 "건축"이다 — 0레벨 공사판으로 놓고 노움이 지어 올린다(끝나면 1레벨)
+    const inst = addBuilding(state, moveMode.type, moveMode.gx, moveMode.gy, moveMode.dir);
+    inst.level = 0; inst.constructing = true;
+    enqueueConstruction(inst.iid, "build", 1);
+    processConstruction(Date.now());  // 빈 슬롯이 있으면 즉시 착공
+    const started = constructionJobFor(inst.iid) && constructionJobFor(inst.iid).end != null;
+    toast(started ? `${bdef(moveMode.type).name} 건설 시작!` : `${bdef(moveMode.type).name} 건설 대기 (건축반 가득 참)`);
     updateHud();
   }
   exitMove();
@@ -99,6 +104,7 @@ function confirmMove() {
 function storeBuilding(iid) {
   const b = byIid(iid);
   if (!b) return;
+  if (b.constructing || constructionJobFor(iid)) { toast("건축이 끝나야 보관할 수 있다"); return; }
   const i = state.buildings.indexOf(b);
   if (i < 0) return;
   state.buildings.splice(i, 1);
