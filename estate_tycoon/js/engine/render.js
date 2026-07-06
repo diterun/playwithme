@@ -279,13 +279,14 @@ function drawClouds(g, w, h) {
 function drawSky(g) {
   const w = canvas.width, h = canvas.height;
   // 하늘 그라데이션 (위=진한 하늘, 아래=옅은 지평선). 헤드리스 스텁이면 단색 폴백.
+  // ★ 물 타일(≈#9dd5e3, 청록빛)과 헷갈리지 않게 하늘은 초록기 뺀 진한 azure 블루로.
   const grd = g.createLinearGradient && g.createLinearGradient(0, 0, 0, h);
   if (grd && grd.addColorStop) {
-    grd.addColorStop(0, "#7db8ea");
-    grd.addColorStop(1, "#cfeafb");
+    grd.addColorStop(0, "#3f83db");   // 위: 진한 azure
+    grd.addColorStop(1, "#a9cdf3");   // 아래(지평선): 옅은 azure — 물보다 파랗고 명도도 다름
     g.fillStyle = grd;
   } else {
-    g.fillStyle = "#a9d6f5";
+    g.fillStyle = "#6ba3e8";
   }
   g.fillRect(0, 0, w, h);
   drawClouds(g, w, h);

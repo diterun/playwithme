@@ -3,7 +3,7 @@
 html, body {
   width: 100%; height: 100%;
   overflow: hidden;
-  background: #a9d6f5;   /* 하늘색 기본 배경 (캔버스가 매 프레임 하늘을 그리지만 여백 대비용) */
+  background: #6ba3e8;   /* 하늘색 기본 배경 (캔버스가 매 프레임 하늘을 그리지만 여백 대비용) */
   font-family: "Segoe UI", "Malgun Gothic", sans-serif;
   color: #eef2f7;
   user-select: none; -webkit-user-select: none;
@@ -11,7 +11,7 @@ html, body {
   -webkit-tap-highlight-color: transparent;
 }
 
-#game { display: block; width: 100vw; height: 100vh; background: #a9d6f5; }
+#game { display: block; width: 100vw; height: 100vh; background: #6ba3e8; }
 /* 모바일: 주소창을 뺀 "실제 보이는 높이"(dvh)를 쓴다 — 100vh는 주소창 뒤 영역까지 포함해서
    그림과 터치 좌표가 어긋난다 */
 @supports (height: 100dvh) {

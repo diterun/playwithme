@@ -78,7 +78,9 @@ document.getElementById("panel-close").addEventListener("click", closePanel);
 document.querySelectorAll("#tabbar .tab").forEach(t => {
   t.addEventListener("click", () => {
     const tab = t.dataset.tab;
+    // 영지 = 항상 닫기. 나머지는 토글: 이미 열려 있는 탭을 다시 누르면 내려간다.
     if (tab === "estate") closePanel();
+    else if (panelKind && tabOf(panelKind) === tab) closePanel();
     else openPanel(tab);
   });
 });
