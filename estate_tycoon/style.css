@@ -3,7 +3,7 @@
 html, body {
   width: 100%; height: 100%;
   overflow: hidden;
-  background: #1a2438;
+  background: #a9d6f5;   /* 하늘색 기본 배경 (캔버스가 매 프레임 하늘을 그리지만 여백 대비용) */
   font-family: "Segoe UI", "Malgun Gothic", sans-serif;
   color: #eef2f7;
   user-select: none; -webkit-user-select: none;
@@ -11,7 +11,7 @@ html, body {
   -webkit-tap-highlight-color: transparent;
 }
 
-#game { display: block; width: 100vw; height: 100vh; }
+#game { display: block; width: 100vw; height: 100vh; background: #a9d6f5; }
 /* 모바일: 주소창을 뺀 "실제 보이는 높이"(dvh)를 쓴다 — 100vh는 주소창 뒤 영역까지 포함해서
    그림과 터치 좌표가 어긋난다 */
 @supports (height: 100dvh) {
@@ -61,6 +61,30 @@ html, body {
 }
 #tabbar .tab span { font-size: 20px; line-height: 1; }
 #tabbar .tab.active { color: #ffd479; }
+
+/* ── 옵션 모달 창 (중앙 창 + 백드롭, 바깥 클릭 시 닫힘) ── */
+#optmodal {
+  position: fixed; inset: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px; background: rgba(6,10,20,0.55);
+}
+#optmodal.hidden { display: none; }
+#optmodal-card {
+  width: min(92vw, 420px); max-height: 82vh;
+  display: flex; flex-direction: column;
+  background: #141b2c; border: 1px solid #2c3a56; border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5); overflow: hidden;
+}
+#optmodal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; font-size: 16px; font-weight: 800; color: #eef2f7;
+  border-bottom: 1px solid #26324a;
+}
+#optmodal-head button {
+  border: none; background: none; color: #8b97ad;
+  font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px;
+}
+#optmodal-body { overflow-y: auto; padding: 12px 16px 16px; }
 
 /* ── 탭 패널(오버레이) ── */
 #panel {

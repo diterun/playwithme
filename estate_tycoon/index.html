@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="theme-color" content="#1a2438" />
+  <meta name="theme-color" content="#7db8ea" />
   <title>estate tycoon</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -63,6 +63,14 @@
     <button class="tab" data-tab="res"><span>📦</span>자원</button>
     <button class="tab" data-tab="save"><span>💾</span>저장</button>
   </nav>
+
+  <!-- ⚙️ 옵션 모달 창 (백드롭 클릭 시 자동 닫힘) -->
+  <div id="optmodal" class="hidden">
+    <div id="optmodal-card">
+      <div id="optmodal-head"><span>⚙️ 옵션</span><button id="optmodal-close">✕</button></div>
+      <div id="optmodal-body"></div>
+    </div>
+  </div>
 
   <div id="toast" class="hidden"></div>
   <input type="file" id="import-file" accept=".json,application/json" style="display:none" />

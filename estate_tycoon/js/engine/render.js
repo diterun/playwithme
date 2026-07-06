@@ -237,10 +237,63 @@ function constructStageURL(b) {
   return buildingImgURL(b.type, b.dir);                    // 후반: 완성 건물 모습
 }
 
+/* ═══════════════ 하늘 배경 (화면 고정 + 흐르는 구름) ═══════════════ */
+// 구름 한 덩이 = 겹치는 타원 뭉치 (dx, dy, rx, ry) — 기준 픽셀(스케일·DPR 곱함).
+const CLOUD_SHAPES = [
+  [[0, 0, 60, 40], [46, 8, 50, 34], [-46, 10, 48, 32], [22, -22, 42, 34], [-20, -16, 40, 30]],
+  [[0, 0, 70, 44], [60, 8, 52, 34], [-56, 10, 50, 32], [12, -26, 46, 34]],
+  [[0, 0, 50, 34], [38, 6, 44, 30], [-38, 8, 42, 28], [0, -20, 40, 28]],
+];
+// 여러 모양·크기·높이·속도의 구름 (y·speed·phase 는 화면 비율/px 기준)
+const CLOUDS = [
+  { shape: 0, y: 0.10, scale: 1.00, speed: 8.0,  alpha: 0.95, phase: 0.00 },
+  { shape: 1, y: 0.22, scale: 0.70, speed: 5.0,  alpha: 0.88, phase: 0.37 },
+  { shape: 2, y: 0.06, scale: 1.30, speed: 11.0, alpha: 0.82, phase: 0.62 },
+  { shape: 1, y: 0.33, scale: 0.55, speed: 4.0,  alpha: 0.80, phase: 0.14 },
+  { shape: 0, y: 0.29, scale: 0.90, speed: 6.5,  alpha: 0.90, phase: 0.80 },
+  { shape: 2, y: 0.17, scale: 0.62, speed: 9.5,  alpha: 0.85, phase: 0.50 },
+];
+function drawClouds(g, w, h) {
+  const t = Date.now() / 1000;
+  const span = w + 340 * DPR;   // 화면 밖에서 다시 들어오도록 여유 폭
+  for (const c of CLOUDS) {
+    const shape = CLOUD_SHAPES[c.shape];
+    const sc = c.scale * DPR;
+    let x = (c.phase * span - t * c.speed * DPR) % span;   // 오른쪽→왼쪽으로 흐름, wrap
+    if (x < 0) x += span;
+    x -= 170 * DPR;
+    const y = c.y * h;
+    g.save();
+    g.globalAlpha = c.alpha;
+    g.fillStyle = "#ffffff";
+    g.beginPath();                 // 한 경로에 타원들을 모아 한 번만 fill → 겹침 이음새 없음
+    for (const p of shape) {
+      const ex = x + p[0] * sc, ey = y + p[1] * sc, rx = p[2] * sc, ry = p[3] * sc;
+      g.moveTo(ex + rx, ey);
+      if (g.ellipse) g.ellipse(ex, ey, rx, ry, 0, 0, Math.PI * 2);
+    }
+    g.fill();
+    g.restore();
+  }
+}
+function drawSky(g) {
+  const w = canvas.width, h = canvas.height;
+  // 하늘 그라데이션 (위=진한 하늘, 아래=옅은 지평선). 헤드리스 스텁이면 단색 폴백.
+  const grd = g.createLinearGradient && g.createLinearGradient(0, 0, 0, h);
+  if (grd && grd.addColorStop) {
+    grd.addColorStop(0, "#7db8ea");
+    grd.addColorStop(1, "#cfeafb");
+    g.fillStyle = grd;
+  } else {
+    g.fillStyle = "#a9d6f5";
+  }
+  g.fillRect(0, 0, w, h);
+  drawClouds(g, w, h);
+}
+
 function render() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = "#1a2438";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  drawSky(ctx);
   ctx.setTransform(DPR * cam.s, 0, 0, DPR * cam.s, DPR * (W / 2 - cam.x * cam.s), DPR * (H / 2 - cam.y * cam.s));
   ctx.imageSmoothingEnabled = true;
 

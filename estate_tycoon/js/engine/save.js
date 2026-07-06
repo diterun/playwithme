@@ -167,6 +167,7 @@ function setBgm(on) {
   lsSet(BGM_KEY, on ? "on" : "off");
   if (on) playBgm(); else pauseBgm();
   refreshPanel();
+  if (typeof optionsOpen === "function" && optionsOpen()) renderOptionsBody();
   toast(on ? "🔊 배경음 켜짐" : "🔇 배경음 꺼짐");
 }
 // 첫 사용자 입력에서 (켜져 있으면) 배경음 시작 — 모바일 자동재생 제약 회피
@@ -189,6 +190,7 @@ function hitBoxEnabled() { return lsGet(HITBOX_KEY) === "on"; }
 function setHitBox(on) {
   lsSet(HITBOX_KEY, on ? "on" : "off");
   refreshPanel();
+  if (typeof optionsOpen === "function" && optionsOpen()) renderOptionsBody();
   toast(on ? "편집 시 터치영역 표시 켬" : "편집 시 터치영역 표시 끔");
 }
 
@@ -223,9 +225,16 @@ function optionTabHTML() {
   html += `<div class="card"><div class="name" style="margin-bottom:6px">🎯 편집 시 터치영역 보기</div>
     <div class="note">편집 모드에서 건물의 터치(탭) 영역을 청록 박스로 보여준다. 터치 영역을 손볼 때만 켜면 된다.</div>
     <button class="btn ${hbOn ? "" : "alt"} wide" data-act="hitbox">${hbOn ? "🎯 터치영역 표시 켬 — 누르면 끔" : "⬜ 터치영역 표시 꺼짐 — 누르면 켬"}</button></div>`;
+  html += `<div class="card"><div class="name" style="margin-bottom:6px">로컬 게임으로 저장</div>
+    <div class="note">게임 전체(그림 포함)+현재 진행상황을 HTML 파일 하나로 만든다. 인터넷 없이 파일만 열면 이어서 플레이 가능. (GitHub Pages로 접속 중일 때만 작동)</div>
+    <button class="btn alt wide" data-act="standalone">💽 HTML 파일 만들기</button></div>`;
+  html += `<div class="card"><div class="name" style="margin-bottom:6px">초기화</div>
+    <div class="note">게임을 처음부터 다시 시작한다. 저장 슬롯·내보낸 파일은 지우지 않는다.</div>
+    <button class="btn danger wide" data-act="reset">🔄 처음부터 다시 시작</button></div>`;
+  html += `<div class="note" style="text-align:center;margin-top:4px;opacity:0.7">버전 v${GAME_DATA.gameVersion}</div>`;
   return html;
 }
-// 💾 저장 탭 — 자동저장·슬롯·파일 백업·로컬 HTML·초기화
+// 💾 저장 탭 — 자동저장·슬롯·파일 백업 (로컬 HTML·초기화는 ⚙️옵션으로 이동)
 function saveTabHTML() {
   let html = `<div class="note" style="margin-bottom:8px">자동저장: ${GAME_DATA.save.autosaveSec}초마다${lastAutoTs ? ` · 마지막 ${new Date(lastAutoTs).toLocaleTimeString("ko-KR")}` : ""}</div>`;
   html += slotMetaHTML("⏱️ 자동저장", lsGet(SKEY + "_auto"), "auto", false);
@@ -236,15 +245,30 @@ function saveTabHTML() {
     <div class="note">저장 파일을 폰/PC에 내려받아 반영구 보관한다. 브라우저 데이터를 지워도 살아남는다.</div>
     <div class="btnrow"><button class="btn alt" data-act="export">📤 파일로 내보내기</button>
     <button class="btn alt" data-act="import">📥 파일 불러오기</button></div></div>`;
-  html += `<div class="card"><div class="name" style="margin-bottom:6px">로컬 게임으로 저장</div>
-    <div class="note">게임 전체(그림 포함)+현재 진행상황을 HTML 파일 하나로 만든다. 인터넷 없이 파일만 열면 이어서 플레이 가능. (GitHub Pages로 접속 중일 때만 작동)</div>
-    <button class="btn alt wide" data-act="standalone">💽 HTML 파일 만들기</button></div>`;
-  html += `<div class="card"><div class="name" style="margin-bottom:6px">초기화</div>
-    <div class="note">게임을 처음부터 다시 시작한다. 저장 슬롯·내보낸 파일은 지우지 않는다.</div>
-    <button class="btn danger wide" data-act="reset">🔄 처음부터 다시 시작</button></div>`;
-  html += `<div class="note" style="text-align:center;margin-top:4px;opacity:0.7">버전 v${GAME_DATA.gameVersion}</div>`;
   return html;
 }
+
+/* ── ⚙️ 옵션 모달 창 (하단 시트가 아니라 중앙 창 + 백드롭 클릭 시 닫힘) ── */
+function optionsOpen() { const m = document.getElementById("optmodal"); return !!m && !m.classList.contains("hidden"); }
+function renderOptionsBody() {
+  const body = document.getElementById("optmodal-body");
+  if (!body) return;
+  body.innerHTML = optionTabHTML();
+  body.querySelectorAll("[data-act]").forEach(el => el.addEventListener("click", () => handleAct(el.dataset.act)));
+}
+function openOptions() {
+  renderOptionsBody();
+  const m = document.getElementById("optmodal");
+  if (m) m.classList.remove("hidden");
+}
+function closeOptions() { const m = document.getElementById("optmodal"); if (m) m.classList.add("hidden"); }
+// 백드롭(창 바깥) 클릭 → 닫기. 카드 안쪽 클릭은 target 이 #optmodal 이 아니라서 안 닫힌다.
+(function wireOptionsModal() {
+  const m = document.getElementById("optmodal");
+  if (m) m.addEventListener("click", e => { if (e.target && e.target.id === "optmodal") closeOptions(); });
+  const c = document.getElementById("optmodal-close");
+  if (c) c.addEventListener("click", closeOptions);
+})();
 
 /* ── 파일 내보내기/가져오기 ── */
 function downloadBlob(blob, filename) {

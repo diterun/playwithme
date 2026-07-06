@@ -82,8 +82,8 @@ document.querySelectorAll("#tabbar .tab").forEach(t => {
     else openPanel(tab);
   });
 });
-// 옵션은 오른쪽 위 버튼으로 (하단 탭에서 뺌)
-document.getElementById("option-btn").addEventListener("click", () => openPanel("option"));
+// 옵션은 하단 오른쪽 버튼 → 중앙 모달 창 (하단 시트 패널 아님)
+document.getElementById("option-btn").addEventListener("click", () => openOptions());
 
 /* ── 패널 조각들 ── */
 function upgradeCardHTML(b) {
@@ -363,9 +363,6 @@ function renderPanel() {
     const mk = marketB();
     title.textContent = `🛒 시장 Lv.${mk ? mk.level : "-"}`;
     html = marketPanelHTML(now);
-  } else if (panelKind === "option") {
-    title.textContent = "⚙️ 옵션";
-    html = optionTabHTML();
   } else if (panelKind === "save") {
     title.textContent = "💾 저장";
     html = saveTabHTML();
@@ -435,7 +432,9 @@ function handleAct(act) {
         syncLand();
         groundDirty = true;  // 칠한 지형도 처음 땅으로 되돌아가게 바닥 다시 그림
         lastEcoTs = Date.now();
-        setEditMode(false); closePanel(); updateHud();
+        setEditMode(false); closePanel();
+        if (typeof closeOptions === "function") closeOptions();   // 옵션 창에서 눌렀으면 닫기
+        updateHud();
         if (typeof clearTut === "function") { clearTut(); tutorialBoot(); }  // 새 영지 → 튜토리얼도 처음부터
         toast("초기화 완료 — 새 영지 시작");
       }
