@@ -342,7 +342,8 @@ html, body {
   background: rgba(16,22,40,0.98); border: 2px solid #3a4a70; border-radius: 16px;
   padding: 14px 16px; box-shadow: 0 10px 34px rgba(0,0,0,0.55);
 }
-#tut.scene #tut-box { bottom: calc(22px + env(safe-area-inset-bottom)); }
+/* 대사창은 위로 — 캐릭터는 화면 아래에 서고, 말풍선이 캐릭터를 가리지 않는다 */
+#tut.scene #tut-box { top: calc(52px + env(safe-area-inset-top)); }
 #tut.coach #tut-box { top: calc(56px + env(safe-area-inset-top)); }
 #tut-ava {
   display: none; float: right; width: 58px; height: 58px; border-radius: 10px;
