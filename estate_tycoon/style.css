@@ -317,12 +317,11 @@ html, body {
 #tut.hidden { display: none; }
 /* scene: 지도 위 반투명 덮개 + 좌/우 초상 + 아래 대사창 (탭 막음) */
 #tut.scene { background: rgba(6,10,20,0.72); }
-/* coach: 덮개 없이 위쪽 대사창만 — 탭은 아래(시장)로 통과 */
-#tut.coach { background: transparent; pointer-events: none; }
-#tut.coach #tut-box { pointer-events: auto; }
+/* coach: 덮개 없이 위쪽 대사창만 — 뒤 패널은 보이되, 화면 아무 데나 탭하면 다음으로 */
+#tut.coach { background: transparent; }
 #tut.coach #tut-scene { display: none; }
 
-#tut-scene { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+#tut-scene { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 1; }
 .tut-por {
   position: absolute; bottom: 0; height: 46vh; max-height: 460px; width: auto;
   filter: drop-shadow(0 6px 14px rgba(0,0,0,0.55));
@@ -339,8 +338,8 @@ html, body {
 
 #tut-box {
   position: absolute; left: 50%; transform: translateX(-50%);
-  width: min(92vw, 640px);
-  background: rgba(16,22,40,0.97); border: 2px solid #3a4a70; border-radius: 16px;
+  width: min(92vw, 640px); z-index: 3;   /* 말풍선은 항상 캐릭터 그림 위에 */
+  background: rgba(16,22,40,0.98); border: 2px solid #3a4a70; border-radius: 16px;
   padding: 14px 16px; box-shadow: 0 10px 34px rgba(0,0,0,0.55);
 }
 #tut.scene #tut-box { bottom: calc(22px + env(safe-area-inset-bottom)); }
@@ -361,10 +360,12 @@ html, body {
   border: 1px solid #3a4a70; background: none; color: #9aa6bd;
   border-radius: 8px; padding: 8px 12px; font-family: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
 }
-#tut-next {
-  border: none; background: #3a6b3a; color: #eafbea;
-  border-radius: 9px; padding: 9px 18px; font-family: inherit; font-size: 14px; font-weight: 800; cursor: pointer;
+#tut-cont {
+  color: #9fd6a6; font-size: 13px; font-weight: 800; letter-spacing: 0.2px;
+  animation: tutcontpulse 1.6s ease-in-out infinite;
 }
+@keyframes tutcontpulse { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { #tut-cont { animation: none; } }
 
 #tut-hint {
   position: fixed; top: calc(56px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);

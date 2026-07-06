@@ -128,7 +128,7 @@ function buildTut() {
       '<div id="tut-text"></div>' +
       '<div id="tut-ctl">' +
         '<button id="tut-skip">건너뛰기</button>' +
-        '<button id="tut-next">다음 ▶</button>' +
+        '<span id="tut-cont">화면을 탭하면 다음 ▶</span>' +
       '</div>' +
     '</div>';
   document.body.appendChild(ov);
@@ -138,8 +138,8 @@ function buildTut() {
   hint.innerHTML = '<span id="tut-hint-txt"></span><button id="tut-hint-skip">건너뛰기</button>';
   document.body.appendChild(hint);
 
+  // 화면 아무 데나 탭하면 다음으로 (다음 버튼 없앰). 건너뛰기만 별도 버튼(전파 차단).
   ov.addEventListener("click", () => { if (tutSeq) tutNext(); });
-  document.getElementById("tut-next").addEventListener("click", e => { e.stopPropagation(); tutNext(); });
   document.getElementById("tut-skip").addEventListener("click", e => { e.stopPropagation(); skipTut(); });
   document.getElementById("tut-hint-skip").addEventListener("click", e => { e.stopPropagation(); skipTut(); });
 }
