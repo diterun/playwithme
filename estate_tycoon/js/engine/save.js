@@ -12,13 +12,51 @@ function checksum(str) {
 function serialize() {
   const data = JSON.parse(JSON.stringify(state));
   return {
-    version: GAME_DATA.version, ts: Date.now(), data,
+    version: GAME_DATA.version, gameVersion: GAME_DATA.gameVersion, ts: Date.now(), data,
     meta: { gold: Math.floor(state.res.gold || 0), castle: castleLevel() },
     sum: checksum(JSON.stringify(data)),
   };
 }
+
+/* ── 저장 마이그레이션 ──────────────────────────────────────────
+   저장 "구조"가 바뀌어 GAME_DATA.version 을 올릴 때, 여기에 [옛version]: fn 을 추가한다.
+   fn(d) = 그 version 의 data 객체를 받아 "바로 다음 version"의 data 로 바꿔 돌려준다.
+   체인으로 여러 단계(4→5→6…)를 순서대로 통과시켜 옛 세이브를 현재 구조까지 끌어올린다.
+   → 이렇게 하면 gameVersion 이 2.0.0 이 돼도(=구조가 몇 번 바뀌어도) 옛 세이브가 유지된다.
+   지금은 비어 있음 = version 4 그대로. 구조를 바꿀 때 함수 하나만 채우면 된다.
+
+   예) version 4 → 5 에서 농장 건물 키를 watermill → farm 으로 바꾼다면:
+     4: (d) => {
+       for (const b of (d.buildings || [])) if (b.type === "watermill") b.type = "farm";
+       for (const b of (d.held || []))      if (b.type === "watermill") b.type = "farm";
+       return d;
+     },
+*/
+const SAVE_MIGRATIONS = {
+  // (구조 변경 시 여기에 추가)
+};
+// 옛 저장을 현재 version 으로 끌어올린다. 변환 경로가 없거나 실패하면 null.
+function migrateSave(obj) {
+  let v = obj.version | 0;
+  let d = obj.data;
+  if (v > GAME_DATA.version) return null;   // 미래 버전 저장은 못 읽는다(다운그레이드 방지)
+  while (v < GAME_DATA.version) {
+    const fn = SAVE_MIGRATIONS[v];
+    if (typeof fn !== "function") return null;   // 이 단계 변환이 없다 → 폐기(안전)
+    try { d = fn(d); } catch (e) { return null; }
+    if (!d) return null;
+    v++;
+  }
+  return Object.assign({}, obj, { version: GAME_DATA.version, data: d });
+}
+
 function applySave(obj) {
-  if (!obj || !obj.data || obj.version !== GAME_DATA.version) return false;
+  if (!obj || !obj.data) return false;
+  // 저장 구조 버전이 다르면 마이그레이션으로 현재 구조까지 끌어올린다(안 되면 거부).
+  if (obj.version !== GAME_DATA.version) {
+    obj = migrateSave(obj);
+    if (!obj) return false;
+  }
   const d = obj.data;
   // 영주성은 맵 또는 보관함(held) 어디엔가 있어야 유효한 저장
   const heldSrc = Array.isArray(d.held) ? d.held : [];
@@ -204,6 +242,7 @@ function saveTabHTML() {
   html += `<div class="card"><div class="name" style="margin-bottom:6px">초기화</div>
     <div class="note">게임을 처음부터 다시 시작한다. 저장 슬롯·내보낸 파일은 지우지 않는다.</div>
     <button class="btn danger wide" data-act="reset">🔄 처음부터 다시 시작</button></div>`;
+  html += `<div class="note" style="text-align:center;margin-top:4px;opacity:0.7">버전 v${GAME_DATA.gameVersion}</div>`;
   return html;
 }
 

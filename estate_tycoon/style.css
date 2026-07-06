@@ -214,9 +214,11 @@ html, body {
   position: fixed; left: 0; right: 0;
   bottom: calc(66px + env(safe-area-inset-bottom));
   display: flex; justify-content: center; gap: 8px; z-index: 24;
+  pointer-events: none; /* 버튼 사이·양옆 빈틈은 아래 편집/옵션 버튼·맵 터치가 통과 */
 }
 #paint-bar.hidden { display: none; }
 #paint-bar button {
+  pointer-events: auto;
   border: 1px solid #2c3a56; border-radius: 12px; padding: 10px 12px;
   background: rgba(27,36,64,0.92); color: #cdd6e6;
   font-family: inherit; font-size: 13px; font-weight: 800; cursor: pointer;
