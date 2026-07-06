@@ -365,6 +365,9 @@ function renderPanel() {
     html = marketPanelHTML(now);
   } else if (panelKind === "option") {
     title.textContent = "⚙️ 옵션";
+    html = optionTabHTML();
+  } else if (panelKind === "save") {
+    title.textContent = "💾 저장";
     html = saveTabHTML();
   } else if (panelKind === "building") {
     const b = byIid(panelArg);

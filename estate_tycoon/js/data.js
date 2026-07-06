@@ -391,7 +391,7 @@ const GAME_DATA = {
     // 결국 reversion 으로 1.0(기준가) 쪽으로 서서히 되돌아온다. band 로 폭주 방지. 오프라인도 진행(catchUpMax 스텝까지).
     dynamic: {
       enabled: true,
-      stepSec: 3600,          // 1시간마다 가격 한 스텝 (그래프가 "최근 10시간"이 되도록)
+      stepSec: 7200,          // 2시간마다 가격 한 스텝 (그래프가 "최근 10시간"이 되도록)
       reversion: 0.08,        // 매 스텝 기준가(×1.0) 쪽으로 8% 회귀
       drift: 0.04,            // 매 스텝 ±4% 잔잔한 흔들림 (전 품목)
       shockChance: 0.12,      // 매 스텝, 품목마다 큰 충격이 올 확률
@@ -498,7 +498,7 @@ const GAME_DATA = {
   // ── 저장 설정 ────────────────────────────────────────────
   save: {
     key: "estate_tycoon_v1",
-    autosaveSec: 60,
+    autosaveSec: 10,
     slots: 3,
   },
 

@@ -28,13 +28,18 @@ html, body {
   font-size: 15px; font-weight: 700;
   pointer-events: none; z-index: 10;
 }
-#hud #edit-btn, #hud #option-btn {
-  pointer-events: auto;
-  border: 1px solid #2c3a56; background: #1b2440; color: #cdd6e6;
-  border-radius: 9px; padding: 6px 10px;
-  font-family: inherit; font-size: 12px; font-weight: 800; cursor: pointer;
+/* 편집·옵션은 하단바 위 좌·우 코너에 뜬다 (패널이 열리면 그 아래로 가려짐) */
+#edit-btn, #option-btn {
+  position: fixed; z-index: 15;
+  bottom: calc(66px + env(safe-area-inset-bottom));
+  border: 1px solid #2c3a56; background: rgba(27,36,64,0.92); color: #cdd6e6;
+  border-radius: 12px; padding: 10px 13px;
+  font-family: inherit; font-size: 13px; font-weight: 800; cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
 }
-#hud #edit-btn.on { background: #7e5a1e; color: #ffe9c0; border-color: #b98a2e; }
+#edit-btn { left: 12px; }
+#option-btn { right: 12px; }
+#edit-btn.on { background: #7e5a1e; color: #ffe9c0; border-color: #b98a2e; }
 #res-chips { display: flex; gap: 10px; flex-wrap: wrap; }
 #hud .chip { display: flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
 #hud .chip .ico { font-size: 16px; }

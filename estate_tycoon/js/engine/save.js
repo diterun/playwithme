@@ -175,7 +175,8 @@ function slotMetaHTML(label, obj, n, canSave) {
     ${canSave ? `<button class="btn" data-act="saveslot:${n}">저장</button>` : ""}
     <button class="btn alt" data-act="loadslot:${n}" ${obj ? "" : "disabled"}>불러오기</button></div>`;
 }
-function saveTabHTML() {
+// ⚙️ 옵션 패널 — 설정(배경음·터치영역)만. 저장 관련은 아래 saveTabHTML(💾 저장 탭)로 분리했다.
+function optionTabHTML() {
   const bgmOn = bgmEnabled();
   let html = `<div class="card"><div class="name" style="margin-bottom:6px">🎵 배경음</div>
     <div class="note">잔잔한 배경 음악을 켜고 끈다.</div>
@@ -184,7 +185,11 @@ function saveTabHTML() {
   html += `<div class="card"><div class="name" style="margin-bottom:6px">🎯 편집 시 터치영역 보기</div>
     <div class="note">편집 모드에서 건물의 터치(탭) 영역을 청록 박스로 보여준다. 터치 영역을 손볼 때만 켜면 된다.</div>
     <button class="btn ${hbOn ? "" : "alt"} wide" data-act="hitbox">${hbOn ? "🎯 터치영역 표시 켬 — 누르면 끔" : "⬜ 터치영역 표시 꺼짐 — 누르면 켬"}</button></div>`;
-  html += `<div class="note" style="margin-bottom:8px">자동저장: ${GAME_DATA.save.autosaveSec}초마다${lastAutoTs ? ` · 마지막 ${new Date(lastAutoTs).toLocaleTimeString("ko-KR")}` : ""}</div>`;
+  return html;
+}
+// 💾 저장 탭 — 자동저장·슬롯·파일 백업·로컬 HTML·초기화
+function saveTabHTML() {
+  let html = `<div class="note" style="margin-bottom:8px">자동저장: ${GAME_DATA.save.autosaveSec}초마다${lastAutoTs ? ` · 마지막 ${new Date(lastAutoTs).toLocaleTimeString("ko-KR")}` : ""}</div>`;
   html += slotMetaHTML("⏱️ 자동저장", lsGet(SKEY + "_auto"), "auto", false);
   for (let n = 1; n <= GAME_DATA.save.slots; n++) {
     html += slotMetaHTML(`슬롯 ${n}`, lsGet(`${SKEY}_slot${n}`), n, true);
@@ -330,7 +335,7 @@ function frame() {
   if (typeof tutorialTick === "function") tutorialTick();   // 영주성 Lv2 → 집 튜토리얼 등 조건 감지
   if (now - lastAutoTs > GAME_DATA.save.autosaveSec * 1000) autoSave();
   // 타이머·수량 표시 갱신 (패널 열려 있을 때 0.5초마다)
-  if (panelKind && panelKind !== "option" && now - lastPanelRefresh > 500) {
+  if (panelKind && panelKind !== "option" && panelKind !== "save" && now - lastPanelRefresh > 500) {
     lastPanelRefresh = now;
     if (!document.activeElement || document.activeElement.tagName !== "INPUT") renderPanel();
   }

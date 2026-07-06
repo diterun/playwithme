@@ -11,13 +11,14 @@
 </head>
 <body>
   <div id="hud">
-    <button id="edit-btn">🔧 편집</button>
     <div id="res-chips"></div>
-    <div class="sep"></div>
-    <button id="option-btn">⚙️ 옵션</button>
   </div>
 
   <canvas id="game"></canvas>
+
+  <!-- 하단바 위 좌·우 floating 버튼 (편집=왼쪽, 옵션=오른쪽) -->
+  <button id="edit-btn">🔧 편집</button>
+  <button id="option-btn">⚙️ 옵션</button>
 
   <!-- 편집 모드 지형 브러시 -->
   <div id="paint-bar" class="hidden">
@@ -60,6 +61,7 @@
     <button class="tab" data-tab="build"><span>🏗️</span>건설</button>
     <button class="tab active" data-tab="estate"><span>🏠</span>영지</button>
     <button class="tab" data-tab="res"><span>📦</span>자원</button>
+    <button class="tab" data-tab="save"><span>💾</span>저장</button>
   </nav>
 
   <div id="toast" class="hidden"></div>
