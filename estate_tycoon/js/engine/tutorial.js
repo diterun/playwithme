@@ -9,7 +9,12 @@
 
 const TUT_KEY = SKEY + "_tut";                 // SKEY 는 save.js 에서 정의(먼저 로드됨)
 const PORTRAIT_BASE = "../assets/portraits/";
-function portraitURL(n) { return PORTRAIT_BASE + n + ".png"; }
+function portraitPath(n) { return PORTRAIT_BASE + n + ".png"; }
+// 초상 URL — standalone(로컬 HTML)일 때는 EMBEDDED_ASSETS 의 base64 를 쓴다(없으면 원본 경로)
+function portraitURL(n) {
+  const p = portraitPath(n);
+  return (typeof window !== "undefined" && window.EMBEDDED_ASSETS && window.EMBEDDED_ASSETS[p]) || p;
+}
 
 // 초상 방향: *_left = 왼쪽 배치(오른쪽=중앙 봄), *_right = 오른쪽 배치(왼쪽 봄)
 // 각 줄: { layout:"scene"|"coach", l, r, who, ava, name, text }
@@ -262,6 +267,18 @@ function tutorialTick() {
   for (const t of CASTLE_TUTS) {
     if (!isDone(t.ch) && lv >= t.lv) { runSeq(t.seq, t.ch, t.ch); return; }
   }
+}
+
+/* ── 로컬 HTML 내보내기용: 모든 챕터에서 쓰는 초상 파일 경로 목록 (save.js exportStandalone 이 base64로 담는다) ── */
+function tutorialAssetList() {
+  const seqs = [TUT_INTRO, TUT_MARKET, TUT_PROD, TUT_HOUSE, TUT_FARM, TUT_BLACKSMITH, TUT_WINDMILL, TUT_CHURCH, TUT_FINALE];
+  const names = new Set();
+  for (const seq of seqs) for (const line of seq) {
+    if (line.l) names.add(line.l);
+    if (line.r) names.add(line.r);
+    if (line.ava) names.add(line.ava);
+  }
+  return [...names].map(portraitPath);
 }
 
 /* ── 부팅: 시작 흐름만 진행 상태에 따라 재개(생산·집은 각자 트리거로) ── */

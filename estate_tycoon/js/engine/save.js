@@ -341,6 +341,7 @@ async function exportStandalone() {
       if (acfg) for (const f of autoFileList(acfg)) urls.add(f);
     }
     if (GAME_DATA.audio && GAME_DATA.audio.bgm) urls.add(GAME_DATA.audio.bgm);  // 배경음도 임베드
+    if (typeof tutorialAssetList === "function") for (const u of tutorialAssetList()) urls.add(u);  // 튜토리얼 캐릭터 초상
     const assets = {};
     await Promise.all([...urls].map(async u => {
       const blob = await fetch(u).then(r => { if (!r.ok) throw new Error(u); return r.blob(); });
