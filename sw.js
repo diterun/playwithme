@@ -4,8 +4,8 @@
 const CACHE = "estate-pwa-v1";
 const SHELL = [
   "estate_tycoon/", "estate_tycoon/index.html",
-  "estate_tycoon/style.css", "estate_tycoon/edit_layout.css",
-  "estate_tycoon/manifest.json", "estate_tycoon/icon-192.png", "estate_tycoon/icon-512.png",
+  "estate_tycoon/css/style.css", "estate_tycoon/css/edit_layout.css",
+  "estate_tycoon/pwa/manifest.json", "estate_tycoon/icons/icon-192.png", "estate_tycoon/icons/icon-512.png",
   "estate_tycoon/js/data.js", "estate_tycoon/js/start.js", "estate_tycoon/js/assets.js",
   "estate_tycoon/js/engine/engine.js", "estate_tycoon/js/engine/render.js", "estate_tycoon/js/engine/gnome.js",
   "estate_tycoon/js/engine/input.js", "estate_tycoon/js/engine/economy.js", "estate_tycoon/js/engine/edit.js",

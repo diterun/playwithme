@@ -372,7 +372,7 @@ function prewarmCache() {
   try {
     if (!canInstallApp()) return;
     if (lsGet(SKEY + "_prewarm") === "v1") return;
-    const urls = collectAssetUrls().concat(["index.html", "style.css", "edit_layout.css", "manifest.json", "icon-192.png", "icon-512.png"]);
+    const urls = collectAssetUrls().concat(["index.html", "css/style.css", "css/edit_layout.css", "pwa/manifest.json", "icons/icon-192.png", "icons/icon-512.png"]);
     let i = 0;
     const step = () => {
       if (i >= urls.length) { lsSet(SKEY + "_prewarm", "v1"); return; }

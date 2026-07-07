@@ -344,16 +344,18 @@ html, body {
 #tut.coach #tut-scene { display: none; }
 
 #tut-scene { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 1; }
+/* 크기·위치는 edit_layout.css의 --tutpor-* 변수에서 조절 (모바일 겹침 방지) */
 .tut-por {
-  position: absolute; bottom: 0; height: 46vh; max-height: 460px; width: auto;
+  position: absolute; bottom: 0; width: auto;
+  height: var(--tutpor-height, 46vh); max-height: var(--tutpor-maxheight, 460px);
   filter: drop-shadow(0 6px 14px rgba(0,0,0,0.55));
   transition: opacity 0.2s, transform 0.2s, filter 0.2s;
 }
-.tut-por.left  { left: -3vw; }
-.tut-por.right { right: -3vw; }
+.tut-por.left  { left: var(--tutpor-side, -3vw); }
+.tut-por.right { right: var(--tutpor-side, -3vw); }
 .tut-por.dim   { opacity: 0.5; filter: brightness(0.55) drop-shadow(0 6px 14px rgba(0,0,0,0.55)); transform: translateY(8px); }
 /* 노움(요정)은 인간보다 훨씬 작게 — 바닥선은 그대로라 작은 요정이 사람 옆에 선 느낌 */
-.tut-por.small { height: 19vh; max-height: 190px; }
+.tut-por.small { height: var(--tutpor-small-height, 19vh); max-height: 190px; }
 .tut-por.small.left  { left: 2vw; }
 .tut-por.small.right { right: 2vw; }
 .tut-por.small.dim   { transform: translateY(4px); }
