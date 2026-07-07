@@ -348,10 +348,16 @@ function collectAssetUrls() {
 
 /* ── PWA: 앱 설치 + 오프라인 프리캐시 ── */
 let deferredInstallPrompt = null;
+let appInstalling = false;  // 설치 프롬프트가 떠 있는 동안 true (중복 클릭 방지)
 if (typeof window !== "undefined" && window.addEventListener) {
   window.addEventListener("beforeinstallprompt", (e) => {
     e.preventDefault(); deferredInstallPrompt = e;
     if (typeof optionsOpen === "function" && optionsOpen()) renderOptionsBody();  // "앱으로 설치" 버튼 갱신
+  });
+  window.addEventListener("appinstalled", () => {
+    appInstalling = false; deferredInstallPrompt = null;
+    if (typeof toast === "function") toast("✅ 앱이 설치되었습니다");
+    if (typeof optionsOpen === "function" && optionsOpen()) renderOptionsBody();
   });
 }
 function canInstallApp() {
@@ -359,10 +365,25 @@ function canInstallApp() {
     typeof navigator !== "undefined" && "serviceWorker" in navigator &&
     typeof location !== "undefined" && location.protocol.indexOf("http") === 0;
 }
+// 이미 앱(홈 화면 아이콘)으로 실행 중인지
+function appAlreadyInstalled() {
+  if (typeof window === "undefined") return false;
+  if (window.navigator && window.navigator.standalone) return true;  // iOS Safari
+  return !!(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+}
 function installApp() {
+  if (appAlreadyInstalled()) { toast("이미 앱으로 실행 중입니다"); return; }
+  if (appInstalling) { toast("이미 설치 중입니다…"); return; }
   if (deferredInstallPrompt) {
+    appInstalling = true;
+    toast("앱으로 설치합니다…");
     deferredInstallPrompt.prompt();
-    deferredInstallPrompt.userChoice.finally(() => { deferredInstallPrompt = null; if (typeof optionsOpen === "function" && optionsOpen()) renderOptionsBody(); });
+    deferredInstallPrompt.userChoice
+      .then((res) => { if (res && res.outcome === "dismissed") toast("설치를 취소했습니다"); })
+      .finally(() => {
+        appInstalling = false; deferredInstallPrompt = null;
+        if (typeof optionsOpen === "function" && optionsOpen()) renderOptionsBody();
+      });
   } else {
     toast("브라우저 메뉴에서 '홈 화면에 추가'를 눌러 설치하세요");
   }
