@@ -329,8 +329,19 @@ function render() {
     items.push({ depth: ft.gx + ft.gy + 2, draw: () => drawFeature(ctx, ft) });
   }
   // 돌아다니는 NPC (건물·지형지물과 같은 깊이 정렬에 섞어 그린다)
+  // 작업형 NPC가 자기 건물 근처(작업 자리)에 있으면 방향에 따라 앞(SE·SW)/뒤(NE·NW)로 고정 배치.
   if (typeof NPCS !== "undefined") for (const n of NPCS) {
-    items.push({ depth: n.fx + n.fy + 1, draw: () => drawNpc(ctx, n) });
+    let depth = n.fx + n.fy + 1;
+    const bb = n.boundIid != null ? byIid(n.boundIid) : null;
+    if (bb && !bb.constructing) {
+      const bf = footDims(bb.type, bb.dir);
+      const near = n.fx >= bb.gx - 1 && n.fx <= bb.gx + bf.w && n.fy >= bb.gy - 1 && n.fy <= bb.gy + bf.h;
+      if (near) {
+        const front = (bb.dir === "SE" || bb.dir === "SW");   // 앞=건물 위로, 뒤=건물에 가림
+        depth = front ? (bb.gx + bb.gy + bf.w + bf.h + 0.7) : (bb.gx + bb.gy - 0.7);
+      }
+    }
+    items.push({ depth, draw: () => drawNpc(ctx, n) });
   }
   // 잠긴 청크의 숲 (화면에 보이는 것만 — 컬링)
   const vhw = W / (2 * cam.s) + 200, vhh = H / (2 * cam.s) + 250;
@@ -361,6 +372,28 @@ function render() {
       ctx.drawImage(coinImg, p.x - cw / 2, p.y - cw / 2 + bob, cw, cw);
     } else {
       ctx.fillText("💰", p.x, p.y + bob);
+    }
+  }
+
+  // 건물 이름·레벨 라벨 (옵션 켜짐 시). 카메라 변환 안이라 폰트를 1/cam.s로 보정해 화면상 크기 고정.
+  if (typeof labelEnabled === "function" && labelEnabled()) {
+    const fs = 11 / cam.s;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.font = "700 " + fs + "px 'Malgun Gothic',sans-serif";
+    for (const b of state.buildings) {
+      if (b.constructing) continue;
+      const d = bdef(b.type), f = footDims(b.type, b.dir);
+      const wx = isoX(b.gx + f.w / 2, b.gy + f.h / 2);
+      const wy = isoY(b.gx, b.gy) - 8 / cam.s;
+      const text = d.name + " Lv." + b.level;
+      const m = ctx.measureText ? ctx.measureText(text) : null;
+      const tw2 = (m && m.width) ? m.width : text.length * fs * 0.62;   // 헤드리스 스텁 대비 폴백
+      const bw = tw2 + 10 / cam.s, bh = fs + 6 / cam.s;
+      ctx.fillStyle = "rgba(10,14,26,0.72)";
+      if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(wx - bw / 2, wy - bh / 2, bw, bh, 4 / cam.s); ctx.fill(); }
+      else ctx.fillRect(wx - bw / 2, wy - bh / 2, bw, bh);
+      ctx.fillStyle = "#eef2f7";
+      ctx.fillText(text, wx, wy);
     }
   }
 

@@ -177,6 +177,8 @@ function onTap(sx, sy) {
   // 2) 건물 탭 → 정보 패널
   const b = buildingAt(w.x, w.y);
   if (b) { openPanel("building", b.iid); return; }
+  // 건물 아닌 곳 탭 + 패널 열려 있음 → 닫는다 (창 바깥 터치로 끄기)
+  if (typeof panelKind !== "undefined" && panelKind) { closePanel(); return; }
   // 3) 잠긴 숲 청크 탭 → 개간 시도
   const t = worldToTile(w.x, w.y);
   if (t.gx >= 0 && t.gy >= 0 && t.gx < MAP_W && t.gy < MAP_H && !landOpen(t.gx, t.gy)) {

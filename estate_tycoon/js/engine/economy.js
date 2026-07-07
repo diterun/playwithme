@@ -340,6 +340,27 @@ function enqueueBuy(res, qty) {
   refreshPanel(); updateHud();
 }
 
+// 대기열 작업 취소 (idx번째). 생산=투입 재료 전액 반환 / 매도=자원 반환 / 매수=골드 반환.
+// 진행 중이던 맨 앞을 취소하면 다음 작업이 지금부터 다시 시작한다.
+function cancelJob(iid, idx) {
+  const b = byIid(iid);
+  if (!b || !b.queue || idx < 0 || idx >= b.queue.length) return;
+  const job = b.queue[idx];
+  if (b.type === "market") {
+    if (job.buy) { state.res.gold += job.gold; toast(`매수 취소 — 골드 반환 +${fmtNum(job.gold)} 🪙`); }
+    else { state.res[job.res] = (state.res[job.res] || 0) + job.qty; toast(`매도 취소 — ${GAME_DATA.resources[job.res].icon}${fmtNum(job.qty)} 반환`); }
+  } else {
+    const rec = bdef(b.type).recipes[job.r];
+    const inn = rec ? scaledIn(rec, job.tier) : null;
+    if (inn) for (const k in inn) state.res[k] = (state.res[k] || 0) + inn[k];
+    toast(inn ? "생산 취소 — 재료 반환" : "생산 취소");
+  }
+  const wasFirst = idx === 0;
+  b.queue.splice(idx, 1);
+  if (wasFirst && b.queue.length) b.queue[0].end = null;  // 다음 것이 processQueues에서 now 기준으로 재시작
+  refreshPanel(); updateHud();
+}
+
 // 집 골드 속도(기본, 소비 보너스 제외)·상한
 function houseRate(b) {
   const h = bdef(b.type).house;

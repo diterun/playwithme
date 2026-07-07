@@ -70,11 +70,27 @@ function openPanel(kind, arg) {
 function closePanel() {
   panelKind = null; panelArg = null;
   document.getElementById("panel").classList.add("hidden");
+  const pv = document.getElementById("panel-prev"), nx = document.getElementById("panel-next");
+  if (pv) pv.classList.add("hidden");
+  if (nx) nx.classList.add("hidden");
   document.querySelectorAll("#tabbar .tab").forEach(t => t.classList.toggle("active", t.dataset.tab === "estate"));
 }
 function refreshPanel() { if (panelKind) renderPanel(); }
 
+// ◀▶ 옆 건물로 넘기기 (위치 순서로 순환)
+function navBuilding(dir) {
+  if (panelKind !== "building") return;
+  const list = state.buildings.slice().sort((a, b) => (a.gx + a.gy) - (b.gx + b.gy) || a.iid - b.iid);
+  if (list.length < 2) return;
+  const idx = list.findIndex(b => b.iid === panelArg);
+  if (idx < 0) return;
+  const nb = list[(idx + dir + list.length) % list.length];
+  openPanel("building", nb.iid);
+}
+
 document.getElementById("panel-close").addEventListener("click", closePanel);
+document.getElementById("panel-prev").addEventListener("click", () => navBuilding(-1));
+document.getElementById("panel-next").addEventListener("click", () => navBuilding(1));
 document.querySelectorAll("#tabbar .tab").forEach(t => {
   t.addEventListener("click", () => {
     const tab = t.dataset.tab;
@@ -86,6 +102,25 @@ document.querySelectorAll("#tabbar .tab").forEach(t => {
 });
 // 옵션은 하단 오른쪽 버튼 → 중앙 모달 창 (하단 시트 패널 아님)
 document.getElementById("option-btn").addEventListener("click", () => openOptions());
+
+/* ── 로컬 HTML(standalone)에서 뒤로가기로 탭이 닫히는 것 방지 ──
+   히스토리에 항목을 하나 넣어두고 popstate 를 가로챈다. 뒤로가기를 누르면
+   열려 있는 UI(옵션 창→이동 모드→패널→편집)를 순서대로 닫고, 닫을 게 없으면 탭을 유지한다.
+   온라인(GitHub Pages)에서는 정상 뒤로가기를 위해 켜지 않는다(EMBEDDED_ASSETS 유무로 구분). */
+(function guardBackButton() {
+  if (typeof window === "undefined" || !window.history || !history.pushState) return;
+  if (!window.EMBEDDED_ASSETS) return;   // 로컬 HTML 로 실행할 때만
+  const push = () => { try { history.pushState({ et: 1 }, ""); } catch (e) {} };
+  push();
+  window.addEventListener("popstate", () => {
+    if (typeof optionsOpen === "function" && optionsOpen()) { closeOptions(); push(); return; }
+    if (typeof moveMode !== "undefined" && moveMode) { if (typeof exitMove === "function") exitMove(); push(); return; }
+    if (typeof panelKind !== "undefined" && panelKind) { closePanel(); push(); return; }
+    if (typeof editMode !== "undefined" && editMode && typeof setEditMode === "function") { setEditMode(false); push(); return; }
+    push();   // 닫을 게 없으면 탭 유지
+    toast("뒤로가기로는 종료되지 않아요 — 탭을 직접 닫아 주세요");
+  });
+})();
 
 /* ── 패널 조각들 ── */
 function upgradeCardHTML(b) {
@@ -151,13 +186,14 @@ function queueHTML(b, now) {
           const tn = tierDef(job.tier).name;
           return `${esc(d.recipes[job.r].name)}${tn ? `(${tn})` : ""} ${outStr}`;
         })();
+    const cancelBtn = `<button class="qcancel" data-act="cancel:${b.iid}:${i}" title="취소">✕</button>`;
     if (i === 0 && job.end != null) {
       const left = (job.end - now) / 1000;
       const pct = Math.min(100, 100 * (1 - left / job.dur));
-      html += `<div class="slot"><div class="slothead"><span>${label}</span><span class="tleft">${fmtDur(left)}</span></div>
+      html += `<div class="slot"><div class="slothead"><span>${label}</span><span class="tleft">${fmtDur(left)}${cancelBtn}</span></div>
         <div class="prog"><div style="width:${Math.max(0, pct).toFixed(1)}%"></div></div></div>`;
     } else {
-      html += `<div class="slot"><div class="slothead"><span>${label}</span><span class="tleft">대기 중 (${fmtDur(job.dur)})</span></div></div>`;
+      html += `<div class="slot"><div class="slothead"><span>${label}</span><span class="tleft">대기 중 (${fmtDur(job.dur)})${cancelBtn}</span></div></div>`;
     }
   }
   // 다음 칸이 열리는 레벨 안내
@@ -213,7 +249,7 @@ function priceGraphHTML(res) {
       ${baseY ? `<line x1="0" y1="${baseY}" x2="${w}" y2="${baseY}" style="stroke:#4a5878;stroke-width:1;stroke-dasharray:3 3"/>` : ""}
       <polyline points="${pts}" style="fill:none;stroke:${stroke};stroke-width:2;stroke-linejoin:round"/>
     </svg>
-    <div class="pglabel">최근 ${h.length}시간 ${pct >= 0 ? "+" : ""}${pct}% <span class="${up ? "up" : "down"}">${up ? "▲" : "▼"}</span></div>
+    <div class="pglabel">최근 ${h.length}회 ${pct >= 0 ? "+" : ""}${pct}% <span class="${up ? "up" : "down"}">${up ? "▲" : "▼"}</span></div>
   </div>`;
 }
 function marketPanelHTML(now) {
@@ -231,6 +267,8 @@ function marketPanelHTML(now) {
   const spread = spreadFor(res);
   const full = mk.queue.length >= capacityOf("market", mk.level);
   const unitDisp = rk => Math.floor(unitPrice(rk));
+  // 목록에 보이는 가격 = 현재 모드의 실제 거래가(매수=올림, 매도=내림)
+  const pickPrice = rk => { const u = unitPrice(rk), s = spreadFor(rk); return mode === "buy" ? Math.ceil(u * s.buy) : Math.floor(u * s.sell); };
   const trend = rk => { const m = priceMultOf(rk); return m > 1.03 ? `<span class="up">▲</span>` : m < 0.97 ? `<span class="down">▼</span>` : ``; };
   // 거래 가능 최대 수량 (매도=보유량, 매수=살 수 있는 만큼)
   const owned = Math.floor(state.res[res] || 0);
@@ -251,7 +289,7 @@ function marketPanelHTML(now) {
       <div class="subtabs">${tabs.map((tb, ti) =>
         `<button class="subtab ${sellForm.tab === ti ? "on" : ""}" data-act="selltab:${ti}">${tb.name}</button>`).join("")}</div>
       <div class="pickrow">${curItems.map(rk =>
-        `<button class="pick ${res === rk ? "on" : ""} ${canProduce(rk) ? "" : "cantmake"}" data-act="sellres:${rk}">${GAME_DATA.resources[rk].icon} ${GAME_DATA.resources[rk].name}<span class="pprice">🪙${fmtNum(unitDisp(rk))}${trend(rk)}</span></button>`).join("")}</div>
+        `<button class="pick ${res === rk ? "on" : ""} ${canProduce(rk) ? "" : "cantmake"}" data-act="sellres:${rk}">${GAME_DATA.resources[rk].icon} ${GAME_DATA.resources[rk].name}<span class="pprice">🪙${fmtNum(pickPrice(rk))}${trend(rk)}</span></button>`).join("")}</div>
       <div class="psel"><span class="pname">${GAME_DATA.resources[res].icon} ${GAME_DATA.resources[res].name}</span>
         <span class="pnow">기준 🪙${fmtNum(unitDisp(res))} · 매수 🪙${fmtNum(Math.ceil(buyUnit))} · 매도 🪙${fmtNum(Math.floor(unitPrice(res) * spread.sell))}</span></div>
       ${priceGraphHTML(res)}`;
@@ -292,11 +330,12 @@ function buildPanelHTML() {
   html += `<div class="note" style="margin-bottom:8px">🔨 건축반 ${busy}/${slots} 가동${waiting ? ` · 대기 ${waiting}` : ""} — 신축·레벨업 모두 시간이 든다(노움이 짓는다).
     영주성 Lv.10·20·30에 건축반이 1칸씩 늘어난다. 영주성 레벨이 오르면 새 건설 허가도 열린다.</div>`;
   // 정렬: 작은집 → 큰집 → 생산시설. "이전 허가 먼저"(orderLock)인 항목은 숨긴다.
-  const cat = t => (t === "house_small" ? 0 : t === "house_big" ? 1 : 2);
+  // 정렬: 지금 지을 수 있는 것(ready) 위 → 잠긴 것(levelLock, 영주성렙 오름차순) → 이미 지은 것(built) 맨 아래
+  const rank = st => (st === "ready" ? 0 : st === "levelLock" ? 1 : 2);
   const list = GAME_DATA.extraBuilds
     .map((e, i) => ({ e, i, st: buildStatus(i) }))
     .filter(x => x.st !== "orderLock")
-    .sort((a, b) => cat(a.e.type) - cat(b.e.type) || a.i - b.i);
+    .sort((a, b) => rank(a.st) - rank(b.st) || a.e.castle - b.e.castle || a.i - b.i);
   for (const { e, i, st } of list) {
     const d = bdef(e.type);
     let right = "", desc = "";
@@ -345,6 +384,12 @@ function renderPanel() {
   const scroll = body.scrollTop;
   const now = Date.now();
   let html = "";
+
+  // ◀▶ 옆 건물 넘기기 버튼은 건물 패널일 때만(건물이 2채 이상)
+  const showNav = panelKind === "building" && state.buildings.length > 1;
+  const prevBtn = document.getElementById("panel-prev"), nextBtn = document.getElementById("panel-next");
+  if (prevBtn) prevBtn.classList.toggle("hidden", !showNav);
+  if (nextBtn) nextBtn.classList.toggle("hidden", !showNav);
 
   if (panelKind === "res") {
     title.textContent = "📦 자원";
@@ -401,6 +446,8 @@ function handleAct(act) {
     case "recipe": enqueueRecipe(+p[1], +p[2], p[3]); break;
     case "restab": resTabIdx = +p[1]; refreshPanel(); break;
     case "hitbox": setHitBox(!hitBoxEnabled()); break;
+    case "label": setLabel(!labelEnabled()); break;
+    case "cancel": cancelJob(+p[1], +p[2]); break;
     case "selltab": {
       sellForm.tab = +p[1];
       const items = sellTabs()[sellForm.tab].items;
@@ -428,6 +475,7 @@ function handleAct(act) {
     case "export": exportFile(); break;
     case "import": document.getElementById("import-file").click(); break;
     case "standalone": exportStandalone(); break;
+    case "installapp": installApp(); break;
     case "reset":
       if (confirm("게임을 처음부터 다시 시작한다. 저장 슬롯과 내보낸 파일은 그대로 남는다. 진행할까?")) {
         state = freshState();

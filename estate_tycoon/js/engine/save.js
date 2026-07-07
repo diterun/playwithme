@@ -194,6 +194,16 @@ function setHitBox(on) {
   toast(on ? "편집 시 터치영역 표시 켬" : "편집 시 터치영역 표시 끔");
 }
 
+/* ── 건물 이름·레벨 표시 옵션 (기본 켜짐) ── */
+const LABEL_KEY = SKEY + "_label";
+function labelEnabled() { const v = lsGet(LABEL_KEY); return v == null ? true : v === "on"; }
+function setLabel(on) {
+  lsSet(LABEL_KEY, on ? "on" : "off");
+  refreshPanel();
+  if (typeof optionsOpen === "function" && optionsOpen()) renderOptionsBody();
+  toast(on ? "건물 이름·레벨 표시 켬" : "건물 이름·레벨 표시 끔");
+}
+
 function autoSave() {
   if (lsSet(SKEY + "_auto", serialize())) lastAutoTs = Date.now();
 }
@@ -225,9 +235,18 @@ function optionTabHTML() {
   html += `<div class="card"><div class="name" style="margin-bottom:6px">🎯 편집 시 터치영역 보기</div>
     <div class="note">편집 모드에서 건물의 터치(탭) 영역을 청록 박스로 보여준다. 터치 영역을 손볼 때만 켜면 된다.</div>
     <button class="btn ${hbOn ? "" : "alt"} wide" data-act="hitbox">${hbOn ? "🎯 터치영역 표시 켬 — 누르면 끔" : "⬜ 터치영역 표시 꺼짐 — 누르면 켬"}</button></div>`;
+  const lbOn = labelEnabled();
+  html += `<div class="card"><div class="name" style="margin-bottom:6px">🏷️ 건물 이름·레벨 표시</div>
+    <div class="note">지도의 건물 위에 이름과 레벨을 표시한다.</div>
+    <button class="btn ${lbOn ? "" : "alt"} wide" data-act="label">${lbOn ? "🏷️ 이름·레벨 표시 켬 — 누르면 끔" : "⬜ 이름·레벨 표시 꺼짐 — 누르면 켬"}</button></div>`;
   html += `<div class="card"><div class="name" style="margin-bottom:6px">로컬 게임으로 저장</div>
     <div class="note">게임 전체(그림 포함)+현재 진행상황을 HTML 파일 하나로 만든다. 인터넷 없이 파일만 열면 이어서 플레이 가능. (GitHub Pages로 접속 중일 때만 작동)</div>
     <button class="btn alt wide" data-act="standalone">💽 HTML 파일 만들기</button></div>`;
+  if (typeof canInstallApp === "function" && canInstallApp()) {
+    html += `<div class="card"><div class="name" style="margin-bottom:6px">📲 앱으로 설치</div>
+      <div class="note">홈 화면에 앱으로 설치하면 새 탭 없이 앱처럼 열리고, 첫 접속 뒤엔 오프라인(비행기모드)에서도 실행됩니다.</div>
+      <button class="btn alt wide" data-act="installapp">📲 앱으로 설치 / 홈 화면에 추가</button></div>`;
+  }
   html += `<div class="card"><div class="name" style="margin-bottom:6px">초기화</div>
     <div class="note">게임을 처음부터 다시 시작한다. 저장 슬롯·내보낸 파일은 지우지 않는다.</div>
     <button class="btn danger wide" data-act="reset">🔄 처음부터 다시 시작</button></div>`;
@@ -306,6 +325,63 @@ document.getElementById("import-file").addEventListener("change", e => {
   fr.readAsText(file);
 });
 
+// 게임이 쓰는 모든 그림·오디오 URL 목록 (standalone 임베드 + PWA 프리캐시 공용)
+function collectAssetUrls() {
+  const urls = new Set();
+  for (const t of BTYPES) for (const dir of DIRS) urls.add(buildingImgURL(t, dir));
+  for (const dir of DIRS) { urls.add(stageImgURL("stage_A", dir)); urls.add(stageImgURL("stage_B", dir)); }
+  if (typeof gnomeFrameList === "function") for (const u of gnomeFrameList()) urls.add(u);
+  const gset = ASSET_MAP.ground || {};
+  if (gset.grassDefault) urls.add(gset.grassDefault);
+  if (gset.overrides) for (const k in gset.overrides) { const v = gset.overrides[k]; const u = typeof v === "string" ? v : v.img; if (u) urls.add(u); }
+  for (const ft of FEATURES) if (ft.img) urls.add(ft.img);
+  for (const u of COIN_URLS) urls.add(u);
+  for (const u of npcFileList()) urls.add(u);
+  for (const dir of DIRS) urls.add(GAME_DATA.land.treeImg + "_" + dir + ".png");
+  if (gset.roadDefault) urls.add(gset.roadDefault);
+  if (gset.waterDefault) urls.add(gset.waterDefault);
+  for (const t of AUTO_TYPES) { const acfg = autoCfg(t); if (acfg) for (const f of autoFileList(acfg)) urls.add(f); }
+  if (GAME_DATA.audio && GAME_DATA.audio.bgm) urls.add(GAME_DATA.audio.bgm);
+  if (typeof tutorialAssetList === "function") for (const u of tutorialAssetList()) urls.add(u);
+  return [...urls];
+}
+
+/* ── PWA: 앱 설치 + 오프라인 프리캐시 ── */
+let deferredInstallPrompt = null;
+if (typeof window !== "undefined" && window.addEventListener) {
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault(); deferredInstallPrompt = e;
+    if (typeof optionsOpen === "function" && optionsOpen()) renderOptionsBody();  // "앱으로 설치" 버튼 갱신
+  });
+}
+function canInstallApp() {
+  return typeof window !== "undefined" && !window.EMBEDDED_ASSETS &&
+    typeof navigator !== "undefined" && "serviceWorker" in navigator &&
+    typeof location !== "undefined" && location.protocol.indexOf("http") === 0;
+}
+function installApp() {
+  if (deferredInstallPrompt) {
+    deferredInstallPrompt.prompt();
+    deferredInstallPrompt.userChoice.finally(() => { deferredInstallPrompt = null; if (typeof optionsOpen === "function" && optionsOpen()) renderOptionsBody(); });
+  } else {
+    toast("브라우저 메뉴에서 '홈 화면에 추가'를 눌러 설치하세요");
+  }
+}
+// 서비스워커가 준비되면, 게임 에셋을 한 번 미리 받아 캐시에 태운다(오프라인 완전 대비). 1회만.
+function prewarmCache() {
+  try {
+    if (!canInstallApp()) return;
+    if (lsGet(SKEY + "_prewarm") === "v1") return;
+    const urls = collectAssetUrls().concat(["index.html", "style.css", "edit_layout.css", "manifest.json", "icon-192.png", "icon-512.png"]);
+    let i = 0;
+    const step = () => {
+      if (i >= urls.length) { lsSet(SKEY + "_prewarm", "v1"); return; }
+      fetch(urls[i++]).catch(() => {}).then(() => setTimeout(step, 40));
+    };
+    step();
+  } catch (e) {}
+}
+
 /* ── 로컬 단일 HTML 내보내기 ──
    index.html 안의 <script src="..."> 태그를 순서대로 읽어 전부 인라인한다.
    (파일을 더 쪼개거나 이름을 바꿔도 index.html만 맞으면 자동으로 따라간다) */
@@ -314,34 +390,14 @@ async function exportStandalone() {
   try {
     const fetchText = f => fetch(f).then(r => { if (!r.ok) throw new Error(f); return r.text(); });
     const html = await fetchText("index.html");
-    const css = await fetchText("style.css");
+    // 모든 stylesheet 링크(style.css, edit_layout.css 등)를 순서대로 인라인 대상으로
+    const links = [...html.matchAll(/<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"[^>]*\/?>/g)];
+    const cssTexts = await Promise.all(links.map(m => fetchText(m[1])));
     const scripts = [...html.matchAll(/<script src="([^"]+)"><\/script>/g)].map(m => m[1]);
     const texts = await Promise.all(scripts.map(fetchText));
 
-    // 게임이 쓰는 모든 그림을 base64로 수집
-    const urls = new Set();
-    for (const t of BTYPES) for (const dir of DIRS) urls.add(buildingImgURL(t, dir));
-    for (const dir of DIRS) { urls.add(stageImgURL("stage_A", dir)); urls.add(stageImgURL("stage_B", dir)); }  // 건축 단계 그림
-    if (typeof gnomeFrameList === "function") for (const u of gnomeFrameList()) urls.add(u);                    // 노움 프레임
-    const gset = ASSET_MAP.ground || {};
-    if (gset.grassDefault) urls.add(gset.grassDefault);
-    if (gset.overrides) for (const k in gset.overrides) {
-      const v = gset.overrides[k];
-      const u = typeof v === "string" ? v : v.img;
-      if (u) urls.add(u);
-    }
-    for (const ft of FEATURES) if (ft.img) urls.add(ft.img);
-    for (const u of COIN_URLS) urls.add(u);
-    for (const u of npcFileList()) urls.add(u);
-    for (const dir of DIRS) urls.add(GAME_DATA.land.treeImg + "_" + dir + ".png");
-    if (gset.roadDefault) urls.add(gset.roadDefault);
-    if (gset.waterDefault) urls.add(gset.waterDefault);
-    for (const t of AUTO_TYPES) {
-      const acfg = autoCfg(t);
-      if (acfg) for (const f of autoFileList(acfg)) urls.add(f);
-    }
-    if (GAME_DATA.audio && GAME_DATA.audio.bgm) urls.add(GAME_DATA.audio.bgm);  // 배경음도 임베드
-    if (typeof tutorialAssetList === "function") for (const u of tutorialAssetList()) urls.add(u);  // 튜토리얼 캐릭터 초상
+    // 게임이 쓰는 모든 그림·오디오를 base64로 수집 (collectAssetUrls = PWA 프리캐시와 공용)
+    const urls = new Set(collectAssetUrls());
     const assets = {};
     await Promise.all([...urls].map(async u => {
       const blob = await fetch(u).then(r => { if (!r.ok) throw new Error(u); return r.blob(); });
@@ -356,7 +412,8 @@ async function exportStandalone() {
     const escJs = s => s.replace(/<\/script/gi, "<\\/script");
     const inject = "<script>window.EMBEDDED_ASSETS=" + JSON.stringify(assets) +
       ";window.EMBEDDED_SAVE=" + JSON.stringify(serialize()) + ";<\/script>";
-    let out = html.replace(/<link[^>]*style\.css[^>]*\/?>/, () => "<style>\n" + css + "\n</style>");
+    let out = html;
+    links.forEach((m, i) => { out = out.replace(m[0], () => "<style>\n" + cssTexts[i] + "\n</style>"); });
     scripts.forEach((f, i) => {
       const inline = (i === 0 ? inject + "\n" : "") + "<script>\n" + escJs(texts[i]) + "\n<\/script>";
       out = out.replace('<script src="' + f + '"></script>', () => inline);
@@ -385,6 +442,10 @@ async function exportStandalone() {
   // 배경음: 켜져 있으면 재생 시도(자동재생 차단 대비 첫 입력에서도 시작)
   if (bgmEnabled()) playBgm();
   armBgmAutostart();
+  // PWA: 서비스워커가 준비되면 에셋을 미리 캐시(오프라인 완전 대비, 1회)
+  if (typeof navigator !== "undefined" && navigator.serviceWorker && navigator.serviceWorker.ready) {
+    navigator.serviceWorker.ready.then(prewarmCache).catch(() => {});
+  }
 })();
 
 document.addEventListener("visibilitychange", () => { if (document.hidden) autoSave(); });

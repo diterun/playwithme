@@ -36,7 +36,6 @@ function setEditMode(on) {
   }
   if (on) {
     closePanel();
-    toast("편집 모드 — 건물 탭=이동·회전, 아래 브러시=지형 칠하기");
   } else {
     setBrush(null);
     exitMove();
@@ -46,6 +45,9 @@ function setEditMode(on) {
 document.getElementById("edit-btn").addEventListener("click", () => setEditMode(!editMode));
 document.querySelectorAll("#paint-bar button").forEach(btn =>
   btn.addEventListener("click", () => setBrush(btn.dataset.brush || null)));
+// 📦 보관함 라벨 누르면 왼쪽 리스트 펼치기/접기
+{ const bl = document.getElementById("box-label");
+  if (bl) bl.addEventListener("click", () => { const bb = document.getElementById("box-bar"); if (bb) bb.classList.toggle("collapsed"); }); }
 
 /* ═══════════════ 이동·회전 ═══════════════ */
 function enterMove(iid) {

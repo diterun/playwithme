@@ -8,6 +8,9 @@
   <meta name="theme-color" content="#3f83db" />
   <title>estate tycoon</title>
   <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="edit_layout.css" /><!-- 편집 버튼 위치 조정판 (숫자만 고치면 됨) -->
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
 </head>
 <body>
   <div id="hud">
@@ -56,6 +59,10 @@
     <div id="panel-body"></div>
   </div>
 
+  <!-- 건물 패널 열릴 때 하단바 위 좌·우 고정: 옆 건물로 넘기기 -->
+  <button id="panel-prev" class="navbtn hidden">◀</button>
+  <button id="panel-next" class="navbtn hidden">▶</button>
+
   <!-- 하단 탭바 (건설·영지·자원 3개) -->
   <nav id="tabbar">
     <button class="tab" data-tab="build"><span>🏗️</span>건설</button>
@@ -90,5 +97,15 @@
   <script src="js/engine/ui.js"></script>
   <script src="js/engine/save.js"></script>
   <script src="js/engine/tutorial.js"></script>
+
+  <!-- PWA 서비스워커 등록 (온라인 http(s)에서만 — 로컬 file:// HTML에선 건너뜀).
+       sw.js 는 repo 루트에 있어 scope 를 상위(../)로 넓혀 ../assets 까지 캐시한다. -->
+  <script>
+    if ("serviceWorker" in navigator && location.protocol.indexOf("http") === 0) {
+      window.addEventListener("load", function () {
+        navigator.serviceWorker.register("../sw.js", { scope: "../" }).catch(function () {});
+      });
+    }
+  </script>
 </body>
 </html>

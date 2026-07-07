@@ -28,15 +28,20 @@ function randomWalkable() {
   }
   return null;
 }
-// 건물 "앞"(남쪽) 우선으로 걸을 수 있는 칸 하나 — 작업 자리
+// 건물 방향에 따른 작업 자리 (화면 기준):
+//   SE=왼쪽아래(남쪽 모서리, 앞) · SW=오른쪽아래(동쪽 모서리, 앞) · NE=왼쪽위(서쪽 모서리, 뒤) · NW=오른쪽위(북쪽 모서리, 뒤)
 function workSpot(b) {
   const f = footDims(b.type, b.dir);
-  const mid = b.gx + Math.floor(f.w / 2);
-  const cands = [[mid, b.gy + f.h]];                                   // 앞 가운데
-  for (let x = 0; x < f.w; x++) if (b.gx + x !== mid) cands.push([b.gx + x, b.gy + f.h]); // 앞 줄
-  for (let y = 0; y < f.h; y++) cands.push([b.gx + f.w, b.gy + y]);    // 오른쪽
-  for (let y = 0; y < f.h; y++) cands.push([b.gx - 1, b.gy + y]);      // 왼쪽
-  for (let x = 0; x < f.w; x++) cands.push([b.gx + x, b.gy - 1]);      // 뒤
+  const south = [], east = [], west = [], north = [];
+  for (let x = 0; x < f.w; x++) { south.push([b.gx + x, b.gy + f.h]); north.push([b.gx + x, b.gy - 1]); }
+  for (let y = 0; y < f.h; y++) { east.push([b.gx + f.w, b.gy + y]); west.push([b.gx - 1, b.gy + y]); }
+  const midFirst = arr => { const m = arr.splice(Math.floor(arr.length / 2), 1); return m.concat(arr); };  // 가운데 칸 우선
+  let primary;
+  if (b.dir === "SE") primary = midFirst(south);       // 왼쪽 아래 (앞)
+  else if (b.dir === "SW") primary = midFirst(east);   // 오른쪽 아래 (앞)
+  else if (b.dir === "NE") primary = midFirst(west);   // 왼쪽 위 (뒤)
+  else primary = midFirst(north);                      // NW: 오른쪽 위 (뒤)
+  const cands = primary.concat(south, east, west, north);   // 폴백: 사방
   for (const c of cands) if (npcWalkable(c[0], c[1])) return c;
   return null;
 }
