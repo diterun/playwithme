@@ -194,15 +194,14 @@ function setHitBox(on) {
   toast(on ? "편집 시 터치영역 표시 켬" : "편집 시 터치영역 표시 끔");
 }
 
-/* ── 건물 이름·레벨 표시 옵션 (기본 켜짐) ── */
-const LABEL_KEY = SKEY + "_label";
-function labelEnabled() { const v = lsGet(LABEL_KEY); return v == null ? true : v === "on"; }
-function setLabel(on) {
-  lsSet(LABEL_KEY, on ? "on" : "off");
-  refreshPanel();
-  if (typeof optionsOpen === "function" && optionsOpen()) renderOptionsBody();
-  toast(on ? "건물 이름·레벨 표시 켬" : "건물 이름·레벨 표시 끔");
-}
+/* ── 건물 이름·레벨 표시 옵션 (이름·레벨 각각 따로, 기본 켜짐) ── */
+const LBL_NAME_KEY = SKEY + "_lblname", LBL_LV_KEY = SKEY + "_lbllv";
+function _lblDefault() { return lsGet(SKEY + "_label") !== "off"; }  // 옛 단일옵션 계승(꺼져 있었으면 기본 꺼짐)
+function labelNameEnabled() { const v = lsGet(LBL_NAME_KEY); return v == null ? _lblDefault() : v === "on"; }
+function labelLevelEnabled() { const v = lsGet(LBL_LV_KEY); return v == null ? _lblDefault() : v === "on"; }
+function _lblRefresh() { refreshPanel(); if (typeof optionsOpen === "function" && optionsOpen()) renderOptionsBody(); }
+function setLabelName(on) { lsSet(LBL_NAME_KEY, on ? "on" : "off"); _lblRefresh(); toast(on ? "건물 이름 표시 켬" : "건물 이름 표시 끔"); }
+function setLabelLevel(on) { lsSet(LBL_LV_KEY, on ? "on" : "off"); _lblRefresh(); toast(on ? "건물 레벨 표시 켬" : "건물 레벨 표시 끔"); }
 
 function autoSave() {
   if (lsSet(SKEY + "_auto", serialize())) lastAutoTs = Date.now();
@@ -235,10 +234,11 @@ function optionTabHTML() {
   html += `<div class="card"><div class="name" style="margin-bottom:6px">🎯 편집 시 터치영역 보기</div>
     <div class="note">편집 모드에서 건물의 터치(탭) 영역을 청록 박스로 보여준다. 터치 영역을 손볼 때만 켜면 된다.</div>
     <button class="btn ${hbOn ? "" : "alt"} wide" data-act="hitbox">${hbOn ? "🎯 터치영역 표시 켬 — 누르면 끔" : "⬜ 터치영역 표시 꺼짐 — 누르면 켬"}</button></div>`;
-  const lbOn = labelEnabled();
-  html += `<div class="card"><div class="name" style="margin-bottom:6px">🏷️ 건물 이름·레벨 표시</div>
-    <div class="note">지도의 건물 위에 이름과 레벨을 표시한다.</div>
-    <button class="btn ${lbOn ? "" : "alt"} wide" data-act="label">${lbOn ? "🏷️ 이름·레벨 표시 켬 — 누르면 끔" : "⬜ 이름·레벨 표시 꺼짐 — 누르면 켬"}</button></div>`;
+  const nOn = labelNameEnabled(), lvOn = labelLevelEnabled();
+  html += `<div class="card"><div class="name" style="margin-bottom:6px">🏷️ 건물 표시</div>
+    <div class="note">지도의 건물 위 표시를 이름·레벨 각각 따로 켜고 끈다(작은 화면에서 가릴 때).</div>
+    <div class="btnrow"><button class="btn ${nOn ? "" : "alt"}" data-act="lblname">${nOn ? "🏷️ 이름 켬" : "⬜ 이름 끔"}</button>
+    <button class="btn ${lvOn ? "" : "alt"}" data-act="lbllv">${lvOn ? "🔢 레벨 켬" : "⬜ 레벨 끔"}</button></div></div>`;
   html += `<div class="card"><div class="name" style="margin-bottom:6px">로컬 게임으로 저장</div>
     <div class="note">게임 전체(그림 포함)+현재 진행상황을 HTML 파일 하나로 만든다. 인터넷 없이 파일만 열면 이어서 플레이 가능. (GitHub Pages로 접속 중일 때만 작동)</div>
     <button class="btn alt wide" data-act="standalone">💽 HTML 파일 만들기</button></div>`;

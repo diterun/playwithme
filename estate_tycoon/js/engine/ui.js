@@ -80,7 +80,10 @@ function refreshPanel() { if (panelKind) renderPanel(); }
 // ◀▶ 옆 건물로 넘기기 (위치 순서로 순환)
 function navBuilding(dir) {
   if (panelKind !== "building") return;
-  const list = state.buildings.slice().sort((a, b) => (a.gx + a.gy) - (b.gx + b.gy) || a.iid - b.iid);
+  // 같은 종류끼리 붙여서 순환 (종류 정의 순서 → 그 안에서 위치 순)
+  const typeOrder = Object.keys(GAME_DATA.buildings);
+  const ord = t => { const i = typeOrder.indexOf(t); return i < 0 ? 999 : i; };
+  const list = state.buildings.slice().sort((a, b) => ord(a.type) - ord(b.type) || (a.gx + a.gy) - (b.gx + b.gy) || a.iid - b.iid);
   if (list.length < 2) return;
   const idx = list.findIndex(b => b.iid === panelArg);
   if (idx < 0) return;
@@ -446,7 +449,8 @@ function handleAct(act) {
     case "recipe": enqueueRecipe(+p[1], +p[2], p[3]); break;
     case "restab": resTabIdx = +p[1]; refreshPanel(); break;
     case "hitbox": setHitBox(!hitBoxEnabled()); break;
-    case "label": setLabel(!labelEnabled()); break;
+    case "lblname": setLabelName(!labelNameEnabled()); break;
+    case "lbllv": setLabelLevel(!labelLevelEnabled()); break;
     case "cancel": cancelJob(+p[1], +p[2]); break;
     case "selltab": {
       sellForm.tab = +p[1];

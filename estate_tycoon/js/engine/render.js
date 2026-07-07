@@ -375,8 +375,10 @@ function render() {
     }
   }
 
-  // 건물 이름·레벨 라벨 (옵션 켜짐 시). 카메라 변환 안이라 폰트를 1/cam.s로 보정해 화면상 크기 고정.
-  if (typeof labelEnabled === "function" && labelEnabled()) {
+  // 건물 이름·레벨 라벨 (옵션: 이름·레벨 각각 따로 토글). 카메라 변환 안이라 폰트를 1/cam.s로 보정.
+  const _lblName = typeof labelNameEnabled === "function" && labelNameEnabled();
+  const _lblLv = typeof labelLevelEnabled === "function" && labelLevelEnabled();
+  if (_lblName || _lblLv) {
     const fs = 11 / cam.s;
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.font = "700 " + fs + "px 'Malgun Gothic',sans-serif";
@@ -385,7 +387,7 @@ function render() {
       const d = bdef(b.type), f = footDims(b.type, b.dir);
       const wx = isoX(b.gx + f.w / 2, b.gy + f.h / 2);
       const wy = isoY(b.gx, b.gy) - 8 / cam.s;
-      const text = d.name + " Lv." + b.level;
+      const text = (_lblName && _lblLv) ? (d.name + " Lv." + b.level) : _lblName ? d.name : ("Lv." + b.level);
       const m = ctx.measureText ? ctx.measureText(text) : null;
       const tw2 = (m && m.width) ? m.width : text.length * fs * 0.62;   // 헤드리스 스텁 대비 폴백
       const bw = tw2 + 10 / cam.s, bh = fs + 6 / cam.s;
