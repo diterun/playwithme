@@ -1,0 +1,15 @@
+{
+  "name": "그냥 달려",
+  "short_name": "달려",
+  "description": "달리기 기록 앱 — 내가 뛴 걸 저장하고, 오늘 몸 상태에 맞는 강도를 추천받아요.",
+  "start_url": "../",
+  "scope": "../",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#16161f",
+  "theme_color": "#E94560",
+  "icons": [
+    { "src": "../icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "../icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="달려" />
+  <meta name="theme-color" content="#E94560" />
+  <title>달려</title>
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem("dalyeo_theme")||"dark";}catch(e){}</script>
+  <link rel="manifest" href="pwa/manifest.json" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="logo">달려</div>
+    <div class="sub" id="hdr-sub">오늘도 한 걸음</div>
+  </header>
+
+  <!-- 설치 배너 (설치 가능할 때만) -->
+  <div id="install-banner">
+    <span class="txt">📲 <b>달려</b>를 홈 화면 앱으로 설치할 수 있어요</span>
+    <button id="ib-yes">설치</button>
+    <button id="ib-no" aria-label="닫기">✕</button>
+  </div>
+
+  <main>
+    <!-- ===== 기록 뷰 ===== -->
+    <section class="view active" id="v-log">
+      <div id="goal-card"></div>
+      <div class="card">
+        <h2>이번 주</h2>
+        <div id="streak"></div>
+        <div id="week-prog"></div>
+      </div>
+      <div id="run-list"></div>
+    </section>
+
+    <!-- ===== 통계 뷰 ===== -->
+    <section class="view" id="v-stat">
+      <div class="card">
+        <h2>전체 기록</h2>
+        <div class="stats">
+          <div class="stat"><div class="n" id="t-cnt">0</div><div class="u">총 횟수</div></div>
+          <div class="stat"><div class="n" id="t-dist">0.0</div><div class="u">총 거리 (km)</div></div>
+          <div class="stat"><div class="n" id="t-time">0</div><div class="u">총 시간 (분)</div></div>
+          <div class="stat"><div class="n" id="t-pace">-</div><div class="u">평균 페이스 (/km)</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>개인 기록 🏅</h2>
+        <div id="pr-grid"></div>
+      </div>
+      <div class="card">
+        <div class="chart-head">
+          <h2>평균 페이스 추이</h2>
+          <div class="chart-ctl">
+            <button id="zoom-out" title="더 많이 보기">－</button>
+            <span id="zoom-lbl">최근 10개</span>
+            <button id="zoom-in" title="더 적게(확대)">＋</button>
+          </div>
+        </div>
+        <div class="chart-chips" id="chart-chips"></div>
+        <div class="chart" id="chart"></div>
+        <div class="chart-cap" id="chart-cap"></div>
+      </div>
+      <div class="card">
+        <h2>월별 거리</h2>
+        <div class="mbars" id="mchart"></div>
+      </div>
+      <div class="card">
+        <h2>요일별 패턴</h2>
+        <div class="mbars wd" id="wdchart"></div>
+      </div>
+      <div class="card">
+        <div class="cal-head">
+          <button id="cal-prev">◀</button>
+          <button id="cal-title">·</button>
+          <button id="cal-next">▶</button>
+        </div>
+        <div class="cal-picker" id="cal-picker" hidden>
+          <div class="cal-pk-year">
+            <button id="pk-py">◀</button><span id="pk-year">·</span><button id="pk-ny">▶</button>
+          </div>
+          <div class="cal-pk-months" id="pk-months"></div>
+        </div>
+        <div class="cal-summary" id="cal-summary"></div>
+        <div class="cal" id="calendar"></div>
+      </div>
+    </section>
+
+    <!-- ===== 건강 뷰 ===== -->
+    <section class="view" id="v-health">
+      <div id="reco-area"></div>
+      <div class="card">
+        <h2>오늘 몸 상태</h2>
+        <div class="slider"><div class="lab"><span>잠은 잘 잤어요?</span><b id="l-sleep">보통</b></div><input type="range" min="1" max="5" value="3" id="s-sleep"></div>
+        <div class="slider"><div class="lab"><span>몸은 가벼워요?</span><b id="l-body">보통</b></div><input type="range" min="1" max="5" value="3" id="s-body"></div>
+        <div class="slider"><div class="lab"><span>근육통·통증은?</span><b id="l-pain">보통</b></div><input type="range" min="1" max="5" value="3" id="s-pain"></div>
+        <div class="slider"><div class="lab"><span>뛰고 싶은 의욕은?</span><b id="l-will">보통</b></div><input type="range" min="1" max="5" value="3" id="s-will"></div>
+        <button class="btn" id="btn-reco">오늘 추천 받기</button>
+      </div>
+      <div class="disc">※ 이 추천은 일반적인 운동 가이드를 참고한 <b>참고용</b>이에요. 진단·의학적 판단이 아니며, 몸에 이상이 있으면 반드시 의사와 상담하세요.</div>
+    </section>
+
+    <!-- ===== 설정 뷰 ===== -->
+    <section class="view" id="v-set">
+      <div class="card" id="install-card" style="display:none">
+        <h2>앱 설치</h2>
+        <p style="font-size:13px;color:var(--dim);margin:0 0 12px;line-height:1.5">홈 화면에 <b>달려</b>를 설치하면 앱처럼 전체화면으로 열리고, 오프라인에서도 기록할 수 있어요.</p>
+        <button class="btn" id="install-btn" style="display:none">📲 홈 화면에 설치</button>
+        <div id="install-ios" class="install-guide" style="display:none">
+          <b>아이폰(Safari) 설치법</b><br>아래 <b>공유 <span style="font-size:15px">⬆️</span></b> 버튼 → <b>홈 화면에 추가</b> 를 누르세요.
+        </div>
+        <div id="install-hint" class="install-guide" style="display:none">
+          브라우저 메뉴(⋮)에서 <b>앱 설치</b> 또는 <b>홈 화면에 추가</b>를 누르면 설치돼요.
+        </div>
+        <div id="install-done" class="install-guide" style="display:none;border-color:var(--ok);color:var(--ok)">
+          ✅ 이미 앱으로 설치돼 실행 중이에요.
+        </div>
+      </div>
+      <div class="card">
+        <h2>목표</h2>
+        <p style="font-size:13px;color:var(--dim);margin:0 0 12px;line-height:1.5">목표 거리와 시간을 정하면, 기록 화면에서 목표 페이스에 얼마나 다가갔는지 보여줘요.</p>
+        <div class="row">
+          <div><label>목표 거리 (km)</label><input type="number" inputmode="decimal" step="0.001" min="0" placeholder="예: 5" id="g-km"></div>
+          <div><label>목표 시간 (분)</label><input type="number" inputmode="numeric" min="0" placeholder="예: 30" id="g-min"></div>
+        </div>
+        <button class="btn sm" id="g-save" style="margin-top:6px">목표 저장</button>
+        <button class="btn ghost sm" id="g-clear" style="margin-top:8px">목표 지우기</button>
+      </div>
+      <div class="card">
+        <h2>주간 목표</h2>
+        <p style="font-size:13px;color:var(--dim);margin:0 0 12px;line-height:1.5">일주일 동안 몇 번·몇 km를 목표로 할지 정하면, 기록 화면 '이번 주'에 진행률로 보여줘요.</p>
+        <div class="row">
+          <div><label>주당 횟수</label><input type="number" inputmode="numeric" min="0" placeholder="예: 3" id="wg-runs"></div>
+          <div><label>주당 거리 (km)</label><input type="number" inputmode="decimal" step="0.1" min="0" placeholder="예: 15" id="wg-km"></div>
+        </div>
+        <button class="btn sm" id="wg-save" style="margin-top:6px">주간 목표 저장</button>
+        <button class="btn ghost sm" id="wg-clear" style="margin-top:8px">주간 목표 지우기</button>
+      </div>
+      <div class="card">
+        <h2>화면 테마</h2>
+        <div class="seg" id="theme-seg">
+          <button data-theme="light">☀️ 밝게</button>
+          <button data-theme="dark">🌙 어둡게</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>데이터</h2>
+        <p style="font-size:13px;color:var(--dim);margin:0 0 12px;line-height:1.5">기록은 이 기기에 저장돼요. 파일로 백업하거나 다른 기기로 옮길 수 있어요.</p>
+        <div class="row" style="margin-bottom:10px;">
+          <button class="btn ghost sm" id="btn-export">📤 백업(JSON)</button>
+          <button class="btn ghost sm" id="btn-import">📥 불러오기</button>
+        </div>
+        <button class="btn ghost sm" id="btn-csv" style="margin-bottom:10px">📊 CSV 내보내기 (엑셀용)</button>
+        <button class="btn ghost sm" id="btn-clear" style="color:var(--danger)">전체 기록 삭제</button>
+        <input type="file" id="file-in" accept=".json,application/json" style="display:none">
+      </div>
+      <div class="disc">달려 · 달리기 기록 앱 · 데이터는 내 폰에만 저장됩니다</div>
+    </section>
+  </main>
+
+  <button class="fab" id="fab">＋</button>
+  <button class="fab ext" id="fab-health" style="display:none;">📋 건강 프로필</button>
+
+  <nav>
+    <button class="active" data-view="v-log"><span class="ic">🏃</span>기록</button>
+    <button data-view="v-stat"><span class="ic">📊</span>통계</button>
+    <button data-view="v-health"><span class="ic">❤️</span>건강</button>
+    <button data-view="v-set"><span class="ic">⚙️</span>설정</button>
+  </nav>
+</div>
+
+<!-- ===== 기록 추가 모달 ===== -->
+<div class="modal" id="modal">
+  <div class="sheet">
+    <div class="hd"><h2 id="m-title">달리기 기록</h2><button class="x" id="m-close">✕</button></div>
+    <label>날짜</label>
+    <input type="date" id="m-date">
+    <label>거리 (km)</label>
+    <input type="number" inputmode="decimal" step="0.001" min="0" placeholder="예: 2.797" id="m-dist">
+    <label>시간</label>
+    <div class="row">
+      <div><input type="number" inputmode="numeric" min="0" placeholder="분 (예: 25)" id="m-min"></div>
+      <div><input type="number" inputmode="numeric" min="0" max="59" placeholder="초 (예: 30)" id="m-sec"></div>
+    </div>
+    <label>어디서 뛰었어요?</label>
+    <div class="seg-sm" id="m-env">
+      <button type="button" data-v="out">🌳 실외</button>
+      <button type="button" data-v="mill">🏃 트레드밀</button>
+      <button type="button" data-v="manual">⚙️ 무동력</button>
+    </div>
+    <label>느낌</label>
+    <select id="m-mood">
+      <option value="😀">😀 상쾌했어요</option>
+      <option value="🙂" selected>🙂 괜찮았어요</option>
+      <option value="😮‍💨">😮‍💨 힘들었어요</option>
+      <option value="😣">😣 너무 무리했어요</option>
+    </select>
+    <label>메모 (선택)</label>
+    <textarea id="m-note" placeholder="오늘 코스, 날씨, 컨디션 등"></textarea>
+    <button class="btn" id="m-save" style="margin-top:14px;">저장하기</button>
+  </div>
+</div>
+
+<!-- ===== 건강 프로필 모달 ===== -->
+<div class="modal" id="modal-health">
+  <div class="sheet">
+    <div class="hd"><h2>내 건강 프로필</h2><button class="x" id="mh-close">✕</button></div>
+    <p style="font-size:13px;color:var(--dim);margin:0 0 14px;line-height:1.5">해당되는 걸 켜고 세부 상태를 골라두면, 건강 탭 추천에 반영돼요. 언제든 바꿀 수 있어요.</p>
+    <div id="disease-list"></div>
+    <button class="btn" id="btn-save-health" style="margin-top:14px;">저장하기</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<!-- 로드 순서: core(공용) → data(카탈로그) → records → health → app(부팅) -->
+<script src="js/core.js"></script>
+<script src="js/data.js"></script>
+<script src="js/records.js"></script>
+<script src="js/health.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
