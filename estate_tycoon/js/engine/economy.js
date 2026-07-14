@@ -193,7 +193,7 @@ function seededRand() {
 }
 function hashStr(s) { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
 
-// 가격 한 스텝(=1시간) 진행: 예약된 시차충격 적용 → 회귀·흔들림·큰충격 → 변화량을 소비제품·형제에 시차 예약 → 클램프 → 기록
+// 가격 한 스텝(=stepSec, 기본 10분) 진행: 예약된 시차충격 적용 → 회귀·흔들림·큰충격 → 변화량을 소비제품·형제에 시차 예약 → 클램프 → 기록
 function stepMarketOnce() {
   const cfg = GAME_DATA.market.dynamic;
   if (!cfg || !cfg.enabled) return;
@@ -219,11 +219,14 @@ function stepMarketOnce() {
     M[k] = m;
   }
   // 3) 이번 변화량 → 소비제품·형제에 "시차"를 두고 예약(연쇄 파급). 제품 변화도 다음 스텝 delta가 되어 또 하류로 번진다
+  //   ★ 전파량은 이웃 수로 나눈다 — 한 자원이 뿌리는 "총합"이 propagate(0.5)/sibling(0.3)을 넘지 않도록.
+  //     (안 나누면 산출 많은 건물[광산·대장간 6종]의 자원이 이웃 수만큼 곱해져 되먹임 이득>1 → 전 품목이 상한으로 폭주하던 버그)
   for (const k of keys) {
     const delta = M[k] - old[k];
     if (Math.abs(delta) < 1e-6) continue;
-    for (const c of (MKT_CONSUMERS[k] || [])) state.market.pending.push({ res: c, amount: delta * cfg.propagate, at: step + (cfg.chainDelaySteps || 1) });
-    for (const sb of (MKT_SIBLINGS[k] || [])) state.market.pending.push({ res: sb, amount: delta * cfg.sibling, at: step + (cfg.siblingDelaySteps || 1) });
+    const cons = MKT_CONSUMERS[k] || [], sibs = MKT_SIBLINGS[k] || [];
+    if (cons.length) for (const c of cons) state.market.pending.push({ res: c, amount: delta * cfg.propagate / cons.length, at: step + (cfg.chainDelaySteps || 1) });
+    if (sibs.length) for (const sb of sibs) state.market.pending.push({ res: sb, amount: delta * cfg.sibling / sibs.length, at: step + (cfg.siblingDelaySteps || 1) });
   }
   // 4) 밴드 클램프
   for (const k of keys) M[k] = Math.max(lo, Math.min(hi, M[k]));
